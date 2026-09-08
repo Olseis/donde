@@ -82,7 +82,7 @@
 <body>
 
     <div id="start-screen" class="screen active">
-        <img src="Logo.png" alt="Dónde queda..." style="max-width: 250px; margin-top: 20px;">
+        <img src="logo.png" alt="Dónde queda..." style="max-width: 250px; margin-top: 20px;">
         <h1 style="font-family: 'Ribeye Marrow', cursive; color: #E2A342; margin-top: 10px; font-size: 2rem;">¿Dónde queda... ? <br><br>[ Edición España ]<br> 🇪🇸</h1>
         
         <button id="btn-start">Comenzar Juego</button>
@@ -272,8 +272,8 @@
             if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
 
             const resultTitle = document.getElementById('result-title');
-            if (isHit) { resultTitle.textContent = "¡Acertaste! 🎉"; resultTitle.style.color = "#4ade80"; } 
-            else { resultTitle.textContent = "Fallaste 😢"; resultTitle.style.color = "#f87171"; }
+            if (isHit) { resultTitle.textContent = "ACERTASTE ✅"; resultTitle.style.color = "#4ade80"; } 
+            else { resultTitle.textContent = "FALLASTE ❌"; resultTitle.style.color = "#f87171"; }
 
             setTimeout(() => {
                 drawMap(exactCollisionBeam, isHit);
