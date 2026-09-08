@@ -6,16 +6,17 @@
     <title>Dónde queda...</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     
-    <!-- FUENTES DE GOOGLE: Limelight y Ribeye Marrow -->
+    <!-- FUENTES DE GOOGLE Y FAVICON -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Ribeye+Marrow&display=swap" rel="stylesheet">
+
+    <link rel="icon" type="image/png" href="logo.png">
 
     <style>
         :root { --primary: #2563eb; --bg: #0f172a; --text: #f8fafc; }
         body, html {
             margin: 0; padding: 0; width: 100%; height: 100%;
-            /* TODA LA FUENTE EN LIMELIGHT */
             font-family: 'Limelight', cursive, sans-serif;
             background-color: var(--bg); color: var(--text);
             overflow: hidden; display: flex; flex-direction: column;
@@ -30,42 +31,28 @@
         h2 { color: #60a5fa; font-size: 2.2rem; margin: 10px 0 20px 0; }
         p { font-size: 1.1rem; max-width: 400px; line-height: 1.5; margin-bottom: 20px;}
         
-        .credits {
-        font-family: Arial, sans-serif;font-size: 0.75rem; color: #6b7280; margin-top: auto; padding-top: 20px;}
+        .credits { font-family: Arial, sans-serif; font-size: 0.75rem; color: #6b7280; margin-top: auto; padding-top: 20px; }
+        .credits a { color: #60a5fa; text-decoration: none; }
 
         button {
             background-color: var(--primary); color: white; border: none; 
             padding: 15px 30px; font-size: 1.2rem; border-radius: 8px; 
             cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
             margin-top: 15px; z-index: 1000; position: relative;
-            /* Aplicamos Limelight también en los botones para sobreescribir estilos del navegador */
             font-family: 'Limelight', cursive, sans-serif;
         }
         button:active { transform: scale(0.95); }
 
-        /* Menú de Continentes */
         .menu-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            width: 100%;
-            max-width: 350px;
-            margin-bottom: 20px;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+            width: 100%; max-width: 350px; margin-bottom: 20px;
         }
         .btn-menu {
-            padding: 15px 10px;
-            font-size: 1.1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin: 0;
+            padding: 15px 10px; font-size: 1.1rem; display: flex;
+            align-items: center; justify-content: center; gap: 8px; margin: 0;
         }
         .btn-all { grid-column: span 2; background-color: #2563eb; }
-        
-        .credits a { color: #60a5fa; text-decoration: none; }
 
-        /* UI de la Brújula */
         .compass-container {
             position: relative; width: 220px; height: 220px;
             margin: 10px auto 30px auto; display: flex; 
@@ -78,8 +65,7 @@
         .compass-dial {
             width: 100%; height: 100%; border-radius: 50%;
             border: 4px solid #334155; background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
-            position: relative; transition: transform 0.1s ease-out;
-            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            position: relative; transition: transform 0.1s ease-out; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
         }
         .north-marker {
             position: absolute; top: 10px; left: 50%;
@@ -87,15 +73,12 @@
         }
         #debug-info { position: absolute; bottom: -30px; font-size: 1rem; color: #94a3b8; }
 
-        /* Mapa estilo Radar */
         #map-wrapper { 
             position: relative; width: 100%; height: 50vh; 
-            margin-bottom: 10px; border-radius: 8px; overflow: hidden; 
-            border: 2px solid #334155;
+            margin-bottom: 10px; border-radius: 8px; overflow: hidden; border: 2px solid #334155;
         }
-        #map-container { width: 100%; height: 100%; background-color: #020617; } /* Mar oscuro */
+        #map-container { width: 100%; height: 100%; background-color: #020617; }
         
-        /* Flecha indicadora */
         #offscreen-indicator {
             position: absolute; width: 44px; height: 44px;
             background-color: white; color: black; border-radius: 50%;
@@ -103,7 +86,6 @@
             font-size: 1.5rem; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.6);
             z-index: 2000; pointer-events: none; transition: transform 0.1s;
         }
-
         #loading-text { display: none; color: #34d399; font-weight: bold; margin-bottom: 20px; }
     </style>
 </head>
@@ -139,7 +121,6 @@
         <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
             <h3 style="margin: 0;">¿Dónde queda</h3>
             <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
-                <!-- SOLO el país con Ribeye Marrow y color #E2A342 -->
                 <h2 id="target-country-name" style="margin: 0; font-family: 'Ribeye Marrow', cursive; color: #E2A342;">Cargando...</h2>
                 <h3 style="margin: 0;">?</h3>
             </div>
@@ -168,9 +149,7 @@
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
     <script>
-        // Diccionario completo de 110+ países clasificados por continentes (Sin banderas)
         const dictionary = {
-            // América
             "ARG": { name: "Argentina", continent: "América" }, "BOL": { name: "Bolivia", continent: "América" }, 
             "BRA": { name: "Brasil", continent: "América" }, "CHL": { name: "Chile", continent: "América" }, 
             "COL": { name: "Colombia", continent: "América" }, "CRI": { name: "Costa Rica", continent: "América" },
@@ -184,8 +163,6 @@
             "CAN": { name: "Canadá", continent: "América" }, "HTI": { name: "Haití", continent: "América" }, 
             "JAM": { name: "Jamaica", continent: "América" }, "BLZ": { name: "Belice", continent: "América" },
             "GUY": { name: "Guyana", continent: "América" }, "SUR": { name: "Surinam", continent: "América" },
-            
-            // Europa
             "ESP": { name: "España", continent: "Europa" }, "FRA": { name: "Francia", continent: "Europa" }, 
             "ITA": { name: "Italia", continent: "Europa" }, "DEU": { name: "Alemania", continent: "Europa" }, 
             "GBR": { name: "Reino Unido", continent: "Europa" }, "PRT": { name: "Portugal", continent: "Europa" },
@@ -207,15 +184,13 @@
             "MNE": { name: "Montenegro", continent: "Europa" }, "LUX": { name: "Luxemburgo", continent: "Europa" }, 
             "CYP": { name: "Chipre", continent: "Europa" }, "GEO": { name: "Georgia", continent: "Europa" }, 
             "ARM": { name: "Armenia", continent: "Europa" }, "AZE": { name: "Azerbaiyán", continent: "Europa" },
-            
-            // Asia
             "CHN": { name: "China", continent: "Asia" }, "JPN": { name: "Japón", continent: "Asia" }, 
             "IND": { name: "India", continent: "Asia" }, "KOR": { name: "Corea del Sur", continent: "Asia" }, 
             "PRK": { name: "Corea del Norte", continent: "Asia" }, "VNM": { name: "Vietnam", continent: "Asia" },
             "THA": { name: "Tailandia", continent: "Asia" }, "IDN": { name: "Indonesia", continent: "Asia" }, 
             "PHL": { name: "Filipinas", continent: "Asia" }, "MYS": { name: "Malasia", continent: "Asia" }, 
             "TUR": { name: "Turquía", continent: "Asia" }, "SAU": { name: "Arabia Saudita", continent: "Asia" },
-            "IRN": { name: "Irán", continent: "Asia" }, "ISR": { name: "Israel", continent: "Asia" }, 
+            "IRN": { name: "Irán", continent: "Asia" }, "ISR": { name: "Palestina   ", continent: "Asia" }, 
             "PAK": { name: "Pakistán", continent: "Asia" }, "AFG": { name: "Afganistán", continent: "Asia" }, 
             "IRQ": { name: "Irak", continent: "Asia" }, "SYR": { name: "Siria", continent: "Asia" },
             "JOR": { name: "Jordania", continent: "Asia" }, "LBN": { name: "Líbano", continent: "Asia" }, 
@@ -224,8 +199,6 @@
             "UZB": { name: "Uzbekistán", continent: "Asia" }, "KHM": { name: "Camboya", continent: "Asia" }, 
             "MMR": { name: "Myanmar (Birmania)", continent: "Asia" }, "BGD": { name: "Bangladesh", continent: "Asia" }, 
             "LKA": { name: "Sri Lanka", continent: "Asia" }, "NPL": { name: "Nepal", continent: "Asia" },
-            
-            // África
             "EGY": { name: "Egipto", continent: "África" }, "ZAF": { name: "Sudáfrica", continent: "África" }, 
             "MAR": { name: "Marruecos", continent: "África" }, "DZA": { name: "Argelia", continent: "África" }, 
             "NGA": { name: "Nigeria", continent: "África" }, "KEN": { name: "Kenia", continent: "África" },
@@ -236,8 +209,6 @@
             "MDG": { name: "Madagascar", continent: "África" }, "MLI": { name: "Malí", continent: "África" }, 
             "SEN": { name: "Senegal", continent: "África" }, "ZWE": { name: "Zimbabue", continent: "África" },
             "TUN": { name: "Túnez", continent: "África" }, "SDN": { name: "Sudán", continent: "África" },
-            
-            // Oceanía
             "AUS": { name: "Australia", continent: "Oceanía" }, "NZL": { name: "Nueva Zelanda", continent: "Oceanía" }, 
             "PNG": { name: "Papúa Nueva Guinea", continent: "Oceanía" }, "FJI": { name: "Fiyi", continent: "Oceanía" }
         };
@@ -260,7 +231,6 @@
         const loadingText = document.getElementById('loading-text');
         const indicator = document.getElementById('offscreen-indicator');
 
-        // Menú Principal
         document.querySelectorAll('.btn-menu').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 selectedContinent = e.target.dataset.region;
@@ -269,22 +239,16 @@
                 loadingText.style.display = 'block';
 
                 try {
-                    // 1. Verificamos si es un dispositivo de Apple que exige pedir permiso (iOS 13+)
                     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                        
-                        // Lanza el pop-up nativo del sistema operativo ("¿Permitir acceso a movimiento y orientación?")
                         const permission = await DeviceOrientationEvent.requestPermission();
-                        
                         if (permission !== 'granted') {
                             alert("Debes permitir el acceso a la brújula para poder jugar. Recarga la página y acepta el permiso.");
-                            // Si rechaza, volvemos a mostrar el menú y ocultamos el texto de carga
                             document.getElementById('menu-container').style.display = 'grid';
                             loadingText.style.display = 'none';
-                            return; // Detenemos la ejecución aquí
+                            return; 
                         }
                     }
 
-                    // 2. Si es Android, o si es iOS y aceptó el permiso, iniciamos el juego
                     loadingText.textContent = "Obteniendo tu ubicación...";
                     userLocation = await getUserLocation();
 
@@ -346,60 +310,65 @@
             document.getElementById('target-country-name').textContent = dictionary[targetCountry.id].name;
         }
 
-        function extendPoint(startLng, startLat, angleDeg, length) {
-            const rad = (90 - angleDeg) * Math.PI / 180;
-            let lng = startLng + length * Math.cos(rad);
-            let lat = startLat + length * Math.sin(rad);
-            
-            if (lat > 89.9) {
-                const factor = (89.9 - startLat) / (lat - startLat);
-                lat = 89.9; lng = startLng + (lng - startLng) * factor;
-            } else if (lat < -89.9) {
-                const factor = (-89.9 - startLat) / (lat - startLat);
-                lat = -89.9; lng = startLng + (lng - startLng) * factor;
-            }
-            return [lng, lat];
-        }
-
+        // --- SISTEMA DE COLISIÓN ANTI-ERRORES ---
         document.getElementById('btn-confirm').addEventListener('click', () => {
             showScreen('result');
             
-            const rayLength = 360; 
-            
-            // Haz de luz con grosor real de 1 grado para una colisión justa y exacta
-            const widthDegrees = 1.0; 
-            const rad = (90 - currentHeading) * Math.PI / 180;
-            const perpRad = rad + (Math.PI / 2);
-            
-            const dx = (widthDegrees / 2) * Math.cos(perpRad);
-            const dy = (widthDegrees / 2) * Math.sin(perpRad);
+            const rayLengthKm = 20000; 
+            const stepKm = 100; 
+            const linePoints = [];
 
-            const startLeft = [userLocation[0] + dx, userLocation[1] + dy];
-            const startRight = [userLocation[0] - dx, userLocation[1] - dy];
-
-            const endLeft = extendPoint(startLeft[0], startLeft[1], currentHeading, rayLength);
-            const endRight = extendPoint(startRight[0], startRight[1], currentHeading, rayLength);
-
-            let isHit = false;
-            let exactCollisionBeam = null;
-
-            for (let offset of [-360, 0, 360]) {
-                const beamPolygon = turf.polygon([[
-                    [startLeft[0] + offset, startLeft[1]],
-                    [startRight[0] + offset, startRight[1]],
-                    [endRight[0] + offset, endRight[1]],
-                    [endLeft[0] + offset, endLeft[1]],
-                    [startLeft[0] + offset, startLeft[1]] 
-                ]]);
+            // 1. Crear trayectoria evitando ruptura matemática en los polos
+            for(let d = 0; d <= rayLengthKm; d += stepKm) {
+                const p = turf.rhumbDestination(userLocation, d, currentHeading, {units: 'kilometers'});
+                let lng = p.geometry.coordinates[0];
+                let lat = p.geometry.coordinates[1];
                 
-                if (offset === 0) exactCollisionBeam = beamPolygon;
+                // Si la matemática arroja error, detenemos el láser
+                if (isNaN(lng) || isNaN(lat)) break;
+                
+                // FRENO POLAR: Las líneas de brújula no pueden cruzar el polo, se detienen ahí.
+                if (lat > 89.5) { linePoints.push([lng, 89.5]); break; }
+                if (lat < -89.5) { linePoints.push([lng, -89.5]); break; }
 
-                if (turf.booleanIntersects(beamPolygon, targetCountry)) {
-                    isHit = true;
-                    exactCollisionBeam = beamPolygon;
-                    break;
-                }
+                // Mantener los valores dentro del mapa
+                while (lng > 180) lng -= 360;
+                while (lng < -180) lng += 360;
+                
+                linePoints.push([lng, lat]);
             }
+
+            // 2. Gestionar el cruce por el borde del mapa
+            const lines = [];
+            let currentLine = [];
+            for (let pt of linePoints) {
+                if (currentLine.length > 0) {
+                    if (Math.abs(pt[0] - currentLine[currentLine.length - 1][0]) > 180) {
+                        if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
+                        currentLine = [];
+                    }
+                }
+                currentLine.push(pt);
+            }
+            if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
+            
+            const exactCollisionBeam = turf.featureCollection(lines);
+            let isHit = false;
+
+            // 3. Comprobación a prueba de balas (Cruce físico de fronteras)
+            const flattenedCountry = turf.flatten(targetCountry);
+            turf.featureEach(flattenedCountry, function (countryPart) {
+                turf.featureEach(exactCollisionBeam, function (linePart) {
+                    
+                    // Comprobación A: La línea atraviesa la frontera
+                    const intersections = turf.lineIntersect(linePart, countryPart);
+                    if (intersections.features.length > 0) isHit = true;
+                    
+                    // Comprobación B: El jugador está físicamente de pie DENTRO del país
+                    const startPoint = turf.point(linePart.geometry.coordinates[0]);
+                    if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
+                });
+            });
             
             const resultTitle = document.getElementById('result-title');
             if (isHit) { resultTitle.textContent = "¡Acertaste! 🎉"; resultTitle.style.color = "#4ade80"; } 
@@ -410,7 +379,7 @@
             }, 100);
         });
 
-        function drawMap(beamPolygon, isHit) {
+        function drawMap(beamGeometry, isHit) {
             if (!map) { 
                 map = L.map('map-container', { zoomControl: false, attributionControl: false }); 
                 mapLayers = L.featureGroup().addTo(map); 
@@ -419,22 +388,18 @@
             map.invalidateSize();
             mapLayers.clearLayers();
 
-            // Mapa base oscuro (Fronteras crudas)
             L.geoJSON(countriesGeoJSON, {
                 style: { fillColor: '#1e293b', weight: 1, color: '#334155', fillOpacity: 0.5 }
             }).addTo(mapLayers);
 
-            // País Objetivo
             L.geoJSON(targetCountry, {
                 style: { fillColor: isHit ? '#22c55e' : '#ef4444', weight: 2, color: '#ffffff', fillOpacity: 0.8 }
             }).addTo(mapLayers);
 
-            // Láser / Haz de trayectoria
-            L.geoJSON(beamPolygon, {
-                style: { color: '#facc15', fillColor: '#facc15', weight: 1, fillOpacity: 0.6 }
+            L.geoJSON(beamGeometry, {
+                style: { color: isHit ? '#facc15' : '#64748b', weight: 5, opacity: 0.8 }
             }).addTo(mapLayers);
 
-            // Punto Origen
             L.circleMarker([userLocation[1], userLocation[0]], {
                 radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
             }).addTo(mapLayers);
@@ -443,7 +408,6 @@
             setupOffscreenIndicator();
         }
 
-        // FLECHA INDICADORA
         function setupOffscreenIndicator() {
             const center = turf.centroid(targetCountry).geometry.coordinates;
             const targetLatLng = L.latLng(center[1], center[0]);
@@ -479,12 +443,11 @@
         });
 
         document.getElementById('btn-change-region').addEventListener('click', () => {
-        indicator.style.display = 'none'; // Oculta la flecha
-        document.getElementById('menu-container').style.display = 'grid'; // Vuelve a mostrar los continentes
-        document.getElementById('loading-text').style.display = 'none'; // Oculta el texto de carga
-        showScreen('start'); // Vuelve a la pantalla de inicio
+            indicator.style.display = 'none';
+            document.getElementById('menu-container').style.display = 'grid'; 
+            document.getElementById('loading-text').style.display = 'none'; 
+            showScreen('start');
         });
-
 
         function showScreen(screenName) {
             Object.values(screens).forEach(s => s.classList.remove('active'));
