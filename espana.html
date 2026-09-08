@@ -6,16 +6,16 @@
     <title>Dónde queda España</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     
-    <!-- FUENTES DE GOOGLE: Limelight y Ribeye Marrow -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Ribeye+Marrow&display=swap" rel="stylesheet">
+
+    <link rel="icon" type="image/png" href="logo.png">
 
     <style>
         :root { --primary: #2563eb; --bg: #0f172a; --text: #f8fafc; }
         body, html {
             margin: 0; padding: 0; width: 100%; height: 100%;
-            /* TODA LA FUENTE EN LIMELIGHT */
             font-family: 'Limelight', cursive, sans-serif;
             background-color: var(--bg); color: var(--text);
             overflow: hidden; display: flex; flex-direction: column;
@@ -30,9 +30,7 @@
         h2 { color: #60a5fa; font-size: 2.2rem; margin: 10px 0 20px 0; }
         p { font-size: 1.1rem; max-width: 400px; line-height: 1.5; margin-bottom: 20px;}
         
-        .credits {
-            font-family: Arial, sans-serif; font-size: 0.75rem; color: #6b7280; margin-top: auto; padding-top: 20px;
-        }
+        .credits { font-family: Arial, sans-serif; font-size: 0.75rem; color: #6b7280; margin-top: auto; padding-top: 20px; }
         .credits a { color: #60a5fa; text-decoration: none; }
 
         button {
@@ -40,12 +38,10 @@
             padding: 15px 30px; font-size: 1.2rem; border-radius: 8px; 
             cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
             margin-top: 15px; z-index: 1000; position: relative;
-            /* Aplicamos Limelight también en los botones para sobreescribir estilos del navegador */
             font-family: 'Limelight', cursive, sans-serif;
         }
         button:active { transform: scale(0.95); }
 
-        /* UI de la Brújula */
         .compass-container {
             position: relative; width: 220px; height: 220px;
             margin: 10px auto 30px auto; display: flex; 
@@ -58,8 +54,7 @@
         .compass-dial {
             width: 100%; height: 100%; border-radius: 50%;
             border: 4px solid #334155; background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
-            position: relative; transition: transform 0.1s ease-out;
-            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            position: relative; transition: transform 0.1s ease-out; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
         }
         .north-marker {
             position: absolute; top: 10px; left: 50%;
@@ -67,15 +62,12 @@
         }
         #debug-info { position: absolute; bottom: -30px; font-size: 1rem; color: #94a3b8; }
 
-        /* Mapa estilo Radar */
         #map-wrapper { 
             position: relative; width: 100%; height: 50vh; 
-            margin-bottom: 10px; border-radius: 8px; overflow: hidden; 
-            border: 2px solid #334155;
+            margin-bottom: 10px; border-radius: 8px; overflow: hidden; border: 2px solid #334155;
         }
-        #map-container { width: 100%; height: 100%; background-color: #020617; } /* Mar oscuro */
+        #map-container { width: 100%; height: 100%; background-color: #020617; } 
         
-        /* Flecha indicadora */
         #offscreen-indicator {
             position: absolute; width: 44px; height: 44px;
             background-color: white; color: black; border-radius: 50%;
@@ -100,8 +92,7 @@
         <div class="credits">
             Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.<br>
             Este proyecto utiliza <a href="https://leafletjs.com/" target="_blank">Leaflet</a>, 
-            <a href="https://turfjs.org/" target="_blank">Turf.js</a>, 
-            <a href="https://github.com/johan/world.geo.json" target="_blank">World GeoJSON</a> y Mapas por Google Maps.
+            <a href="https://turfjs.org/" target="_blank">Turf.js</a> y Mapas por Google Maps.
         </div>
     </div>
 
@@ -110,7 +101,6 @@
         <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
             <h3 style="margin: 0;">¿Dónde queda</h3>
             <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
-                <!-- SOLO el país con Ribeye Marrow y color #E2A342 -->
                 <h2 id="target-country-name" style="margin: 0; font-family: 'Ribeye Marrow', cursive; color: #E2A342;">Cargando...</h2>
                 <h3 style="margin: 0;">?</h3>
             </div>
@@ -139,7 +129,6 @@
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
     <script>
-        // BASE DE DATOS: 52 Ciudades Españolas (Capitales + ciudades importantes)
         const citiesData = [
             { name: "Madrid", lat: 40.4168, lng: -3.7038 }, { name: "Barcelona", lat: 41.3874, lng: 2.1686 },
             { name: "Valencia", lat: 39.4699, lng: -0.3763 }, { name: "Sevilla", lat: 37.3891, lng: -5.9845 },
@@ -166,14 +155,15 @@
             { name: "Pontevedra", lat: 42.4310, lng: -8.6444 }, { name: "Zamora", lat: 41.5033, lng: -5.7463 },
             { name: "Ávila", lat: 40.6543, lng: -4.6962 }, { name: "Palencia", lat: 42.0095, lng: -4.5241 },
             { name: "Guadalajara", lat: 40.6333, lng: -3.1667 }, { name: "Ciudad Real", lat: 38.9863, lng: -3.9291 },
-            { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 }
+            { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 },
+            // JEJE TÁLIGA
+            { name: "Táliga", lat: 38.5267, lng: -7.0147 }
         ];
 
         let userLocation = null;
         let currentHeading = 0; 
         let targetCity = null;
-        let targetPolygon = null; // El círculo de 20km alrededor de la ciudad
-        
+        let targetPolygon = null; 
         let map = null;
         let mapLayers = null; 
 
@@ -192,21 +182,16 @@
             loadingText.style.display = 'block';
 
             try {
-                // 1. Verificamos si es un dispositivo de Apple que exige pedir permiso (iOS 13+)
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    
-                    // Lanza el pop-up nativo del sistema operativo
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    
                     if (permission !== 'granted') {
                         alert("Debes permitir el acceso a la brújula para poder jugar. Recarga la página y acepta el permiso.");
                         document.getElementById('btn-start').style.display = 'block';
                         loadingText.style.display = 'none';
-                        return; // Detenemos la ejecución aquí
+                        return; 
                     }
                 }
 
-                // 2. Si es Android, o si es iOS y aceptó el permiso, iniciamos el juego
                 loadingText.textContent = "Obteniendo tu ubicación...";
                 userLocation = await getUserLocation();
 
@@ -250,48 +235,42 @@
 
         function startNewRound() {
             showScreen('game');
-            // Seleccionar ciudad al azar
             targetCity = citiesData[Math.floor(Math.random() * citiesData.length)];
             document.getElementById('target-country-name').textContent = targetCity.name;
-
-            // Crear un área de acierto de 20 km de radio alrededor de la ciudad
             targetPolygon = turf.circle([targetCity.lng, targetCity.lat], 20, {units: 'kilometers'});
         }
 
-        function extendPoint(startLng, startLat, angleDeg, length) {
-            const rad = (90 - angleDeg) * Math.PI / 180;
-            let lng = startLng + length * Math.cos(rad);
-            let lat = startLat + length * Math.sin(rad);
-            return [lng, lat]; // Distancias en España no cruzan los polos, matemática simple es suficiente
-        }
-
+        // --- SISTEMA DE COLISIÓN ANTI-ERRORES ---
         document.getElementById('btn-confirm').addEventListener('click', () => {
             showScreen('result');
             
-            const rayLength = 30; // 30 grados geográficos son ~3000km (cubre toda España y Canarias de sobra)
+            const rayLengthKm = 4000; 
+            const stepKm = 20; 
+            const linePoints = [];
+
+            // 1. Crear trayectoria limitando fallos matemáticos
+            for(let d = 0; d <= rayLengthKm; d += stepKm) {
+                const p = turf.rhumbDestination(userLocation, d, currentHeading, {units: 'kilometers'});
+                let lng = p.geometry.coordinates[0];
+                let lat = p.geometry.coordinates[1];
+                
+                if (isNaN(lng) || isNaN(lat)) break;
+                if (lat > 89.5) { linePoints.push([lng, 89.5]); break; }
+                if (lat < -89.5) { linePoints.push([lng, -89.5]); break; }
+
+                linePoints.push([lng, lat]);
+            }
             
-            // GROSOR DEL LÁSER: 0.4 grados (aprox 44 km de ancho). Es un rayo muy preciso.
-            const widthDegrees = 0.4; 
-            const rad = (90 - currentHeading) * Math.PI / 180;
-            const perpRad = rad + (Math.PI / 2);
+            const exactCollisionBeam = turf.lineString(linePoints);
+            let isHit = false;
             
-            const dx = (widthDegrees / 2) * Math.cos(perpRad);
-            const dy = (widthDegrees / 2) * Math.sin(perpRad);
-
-            const startLeft = [userLocation[0] + dx, userLocation[1] + dy];
-            const startRight = [userLocation[0] - dx, userLocation[1] - dy];
-
-            const endLeft = extendPoint(startLeft[0], startLeft[1], currentHeading, rayLength);
-            const endRight = extendPoint(startRight[0], startRight[1], currentHeading, rayLength);
-
-            // Generar el rayo de colisión
-            const exactCollisionBeam = turf.polygon([[
-                startLeft, startRight, endRight, endLeft, startLeft
-            ]]);
-
-            // Intersección entre el láser y el área de 20km de la ciudad
-            const isHit = turf.booleanIntersects(exactCollisionBeam, targetPolygon);
+            // 2. Colisión física contra el borde del círculo o si el jugador está dentro
+            const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
+            if (intersections.features.length > 0) isHit = true;
             
+            const startPoint = turf.point(linePoints[0]);
+            if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
+
             const resultTitle = document.getElementById('result-title');
             if (isHit) { resultTitle.textContent = "¡Acertaste! 🎉"; resultTitle.style.color = "#4ade80"; } 
             else { resultTitle.textContent = "Fallaste 😢"; resultTitle.style.color = "#f87171"; }
@@ -301,7 +280,7 @@
             }, 100);
         });
 
-        function drawMap(beamPolygon, isHit) {
+        function drawMap(beamGeometry, isHit) {
             if (!map) { 
                 map = L.map('map-container', { zoomControl: false, attributionControl: false }); 
                 mapLayers = L.featureGroup().addTo(map); 
@@ -310,30 +289,24 @@
             map.invalidateSize();
             mapLayers.clearLayers();
 
-            // Mapa base de Google Maps
             L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(map);
 
-            // Dibujar el área de la Ciudad (Círculo 20km)
             L.geoJSON(targetPolygon, {
                 style: { fillColor: isHit ? '#22c55e' : '#ef4444', weight: 2, color: '#ffffff', fillOpacity: 0.8 }
             }).addTo(mapLayers);
 
-            // Dibujar un marcador estético en el centro de la ciudad
             L.circleMarker([targetCity.lat, targetCity.lng], {
                 radius: 4, fillColor: '#000000', color: '#000000', weight: 1, fillOpacity: 1
             }).addTo(mapLayers);
 
-            // Dibujar el Láser
-            L.geoJSON(beamPolygon, {
-                style: { color: isHit ? '#facc15' : '#334155', fillColor: isHit ? '#facc15' : '#334155', weight: 1, fillOpacity: 0.6 }
+            L.geoJSON(beamGeometry, {
+                style: { color: isHit ? '#facc15' : '#64748b', weight: 5, opacity: 0.8 }
             }).addTo(mapLayers);
 
-            // Tu ubicación
             L.circleMarker([userLocation[1], userLocation[0]], {
                 radius: 6, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
             }).addTo(mapLayers);
 
-            // Centrar cámara calculando la distancia entre tú y la ciudad para que quepan ambos
             const bounds = L.latLngBounds([
                 [userLocation[1], userLocation[0]],
                 [targetCity.lat, targetCity.lng]
