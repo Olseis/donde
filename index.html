@@ -107,6 +107,8 @@
             <button class="btn-menu" data-region="Oceanía">Oceanía</button>
             <button class="btn-menu" onclick="window.location.href='espana.html'" style="background-color: #dc2626; width: 100%; max-width: 350px;">🇪🇸 España</button> 
         </div>
+        
+        <p id="start-loading-text" class="loading-text" style="margin-top: 15px;">Cargando mapa mundial...</p>
 
         <div class="credits">   
             Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.<br>
@@ -119,6 +121,10 @@
     <!-- PANTALLA DE UBICACIÓN -->
     <div id="location-screen" class="screen">
         <h2 style="font-size: 1.8rem; margin-bottom: 10px; color: #E2A342;">Tu punto de partida</h2>
+        
+        <!-- BOTÓN DE UBICACIÓN GUARDADA -->
+        <button id="btn-saved-location" style="display: none; margin-bottom: 15px; width: 100%; max-width: 300px; background-color: #f59e0b; color: #000;">🔄 Usar última ubicación</button>
+
         <button id="btn-gps" style="margin-bottom: 15px; width: 100%; max-width: 300px; background-color: #10b981;">📍 Usar ubicación GPS</button>
         
         <p style="margin: 5px 0;">O marca tu posición en el mapa:</p>
@@ -248,20 +254,60 @@
 
         // Mostrar pantalla de ubicación tras seleccionar región
         document.querySelectorAll('.btn-menu').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 if (e.target.dataset.region) {
                     selectedContinent = e.target.dataset.region;
+                    
+                    document.getElementById('menu-container').style.display = 'none';
+                    const startLoading = document.getElementById('start-loading-text');
+                    if(startLoading) startLoading.style.display = 'block';
+
+                    if (!countriesGeoJSON) {
+                        try {
+                            let geoRes = await fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json');
+                            countriesGeoJSON = await geoRes.json();
+                        } catch (error) {
+                            alert("Error al descargar mapas. Revisa tu conexión.");
+                            document.getElementById('menu-container').style.display = 'grid';
+                            if(startLoading) startLoading.style.display = 'none';
+                            return;
+                        }
+                    }
+
+                    if(startLoading) startLoading.style.display = 'none';
                     showScreen('location');
 
+                    // Leer de memoria local para auto-completar ubicación
+                    const savedLocStr = localStorage.getItem('dondeQueda_location');
+                    let savedLoc = null;
+                    if (savedLocStr) {
+                        savedLoc = JSON.parse(savedLocStr);
+                        tempLocation = savedLoc;
+                        document.getElementById('btn-saved-location').style.display = 'block'; 
+                        document.getElementById('btn-confirm-location').disabled = false; 
+                    }
+
                     if (!selectionMap) {
-                        selectionMap = L.map('select-map-container', { zoomControl: false }).setView([20, 0], 1);
-                        L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(selectionMap);
+                        const startCenter = savedLoc ? [savedLoc[1], savedLoc[0]] : [20, 0];
+                        selectionMap = L.map('select-map-container', { zoomControl: false, attributionControl: false }).setView(startCenter, savedLoc ? 4 : 1);
                         
+                        L.geoJSON(countriesGeoJSON, {
+                            style: { fillColor: '#1e293b', weight: 1, color: '#334155', fillOpacity: 0.5 }
+                        }).addTo(selectionMap);
+                        
+                        if (savedLoc) {
+                             selectionMarker = L.circleMarker([savedLoc[1], savedLoc[0]], {
+                                 radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
+                             }).addTo(selectionMap);
+                        }
+
                         selectionMap.on('click', (ev) => {
                             tempLocation = [ev.latlng.lng, ev.latlng.lat];
                             
                             if (!selectionMarker) {
-                                selectionMarker = L.marker(ev.latlng).addTo(selectionMap);
+                                selectionMarker = L.circleMarker(ev.latlng, {
+                                    radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
+                                }).addTo(selectionMap);
                             } else {
                                 selectionMarker.setLatLng(ev.latlng);
                             }
@@ -275,8 +321,8 @@
             });
         });
 
-        // Inicializar el juego (GPS o Mapa)
-        async function initializeGameSession(useGps) {
+        // Inicializar el juego (GPS, Mapa o Guardado)
+        async function initializeGameSession(source) {
             const loadingText = document.getElementById('location-loading-text');
             loadingText.style.display = 'block';
             
@@ -290,19 +336,20 @@
                     }
                 }
 
-                if (useGps) {
+                if (source === 'gps') {
                     loadingText.textContent = "Obteniendo tu GPS...";
                     userLocation = await getUserLocation();
-                } else {
+                } else if (source === 'map') {
                     loadingText.textContent = "Procesando mapa...";
                     userLocation = tempLocation;
+                } else if (source === 'saved') {
+                    loadingText.textContent = "Cargando datos...";
+                    userLocation = JSON.parse(localStorage.getItem('dondeQueda_location'));
                 }
 
-                if (!countriesGeoJSON) {
-                    loadingText.textContent = "Descargando mapas mundiales...";
-                    let geoRes = await fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json').catch(() => null);
-                    if (!geoRes || !geoRes.ok) throw new Error("Error de red al descargar polígonos.");
-                    countriesGeoJSON = await geoRes.json();
+                // Guardar la ubicación en la memoria del navegador para la próxima vez
+                if (userLocation) {
+                    localStorage.setItem('dondeQueda_location', JSON.stringify(userLocation));
                 }
 
                 startCompass();
@@ -316,8 +363,9 @@
             }
         }
 
-        document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession(true));
-        document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession(false));
+        document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession('gps'));
+        document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession('map'));
+        document.getElementById('btn-saved-location').addEventListener('click', () => initializeGameSession('saved'));
 
         function getUserLocation() {
             return new Promise((resolve, reject) => {
@@ -359,11 +407,9 @@
             document.getElementById('target-country-name').textContent = dictionary[targetCountry.id].name;
         }
 
-        // --- SISTEMA DE COMPROBACIÓN (CON DISTANCIA DINÁMICA) ---
         document.getElementById('btn-confirm').addEventListener('click', () => {
             showScreen('result');
             
-            // Calculamos la distancia hasta el país y limitamos la línea a esa distancia + 1500km
             const targetCenter = turf.centroid(targetCountry).geometry.coordinates;
             const distanceToTarget = turf.distance(userLocation, targetCenter, {units: 'kilometers'});
             const rayLengthKm = Math.min(distanceToTarget + 1500, 20000); 
@@ -484,6 +530,7 @@
 
         document.getElementById('btn-change-region').addEventListener('click', () => {
             indicator.style.display = 'none';
+            document.getElementById('menu-container').style.display = 'grid'; 
             showScreen('start');
         });
 
