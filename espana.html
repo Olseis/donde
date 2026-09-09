@@ -41,6 +41,7 @@
             font-family: 'Limelight', cursive, sans-serif;
         }
         button:active { transform: scale(0.95); }
+        button:disabled { background-color: #64748b !important; cursor: not-allowed; }
 
         .compass-container {
             position: relative; width: 220px; height: 220px;
@@ -76,7 +77,7 @@
             z-index: 2000; pointer-events: none; transition: transform 0.1s;
         }
 
-        #loading-text { display: none; color: #34d399; font-weight: bold; margin-bottom: 20px; }
+        .loading-text { display: none; color: #34d399; font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -87,13 +88,24 @@
         
         <button id="btn-start">Comenzar Juego</button>
         <button onclick="window.location.href='index.html'" style="background-color: #4b5563; margin-top: 10px;">🌍 Jugar Edición Mundial</button>
-        <p id="loading-text">Calibrando...</p>
 
         <div class="credits">
             Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.<br>
             Este proyecto utiliza <a href="https://leafletjs.com/" target="_blank">Leaflet</a>, 
             <a href="https://turfjs.org/" target="_blank">Turf.js</a> y Mapas por Google Maps.
         </div>
+    </div>
+
+    <!-- PANTALLA DE UBICACIÓN -->
+    <div id="location-screen" class="screen">
+        <h2 style="font-size: 1.8rem; margin-bottom: 10px; color: #E2A342;">Tu punto de partida</h2>
+        <button id="btn-gps" style="margin-bottom: 15px; width: 100%; max-width: 300px; background-color: #10b981;">📍 Usar ubicación GPS</button>
+        
+        <p style="margin: 5px 0;">O marca tu posición en el mapa:</p>
+        <div id="select-map-container" style="width: 100%; max-width: 400px; height: 35vh; border-radius: 8px; border: 2px solid #334155; margin-bottom: 15px; background-color: #020617;"></div>
+        
+        <button id="btn-confirm-location" disabled>Confirmar Mapa</button>
+        <p id="location-loading-text" class="loading-text"></p>
     </div>
 
     <div id="game-screen" class="screen">
@@ -156,7 +168,6 @@
             { name: "Ávila", lat: 40.6543, lng: -4.6962 }, { name: "Palencia", lat: 42.0095, lng: -4.5241 },
             { name: "Guadalajara", lat: 40.6333, lng: -3.1667 }, { name: "Ciudad Real", lat: 38.9863, lng: -3.9291 },
             { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 },
-            // JEJE TÁLIGA
             { name: "Táliga", lat: 38.5267, lng: -7.0147 }
         ];
 
@@ -167,43 +178,81 @@
         let map = null;
         let mapLayers = null; 
 
+        let selectionMap = null;
+        let selectionMarker = null;
+        let tempLocation = null;
+
         const screens = {
             start: document.getElementById('start-screen'),
+            location: document.getElementById('location-screen'),
             game: document.getElementById('game-screen'),
             result: document.getElementById('result-screen')
         };
         const compassDial = document.getElementById('compass-dial');
         const debugInfo = document.getElementById('debug-info');
         const indicator = document.getElementById('offscreen-indicator');
-        const loadingText = document.getElementById('loading-text');
 
-        document.getElementById('btn-start').addEventListener('click', async () => {
-            document.getElementById('btn-start').style.display = 'none';
+        // Mostrar pantalla de ubicación al empezar
+        document.getElementById('btn-start').addEventListener('click', () => {
+            showScreen('location');
+            
+            if (!selectionMap) {
+                // Centramos el mapa sobre España para mayor comodidad
+                selectionMap = L.map('select-map-container', { zoomControl: false }).setView([40.0, -3.0], 5);
+                L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(selectionMap);
+                
+                selectionMap.on('click', (ev) => {
+                    tempLocation = [ev.latlng.lng, ev.latlng.lat];
+                    
+                    if (!selectionMarker) {
+                        selectionMarker = L.marker(ev.latlng).addTo(selectionMap);
+                    } else {
+                        selectionMarker.setLatLng(ev.latlng);
+                    }
+                    
+                    const btnConfirm = document.getElementById('btn-confirm-location');
+                    btnConfirm.disabled = false;
+                });
+            }
+            setTimeout(() => selectionMap.invalidateSize(), 200); 
+        });
+
+        // Inicializar el juego (GPS o Mapa)
+        async function initializeGameSession(useGps) {
+            const loadingText = document.getElementById('location-loading-text');
             loadingText.style.display = 'block';
 
             try {
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                     const permission = await DeviceOrientationEvent.requestPermission();
                     if (permission !== 'granted') {
-                        alert("Debes permitir el acceso a la brújula para poder jugar. Recarga la página y acepta el permiso.");
-                        document.getElementById('btn-start').style.display = 'block';
+                        alert("Debes permitir el acceso a la brújula para poder jugar.");
                         loadingText.style.display = 'none';
                         return; 
                     }
                 }
 
-                loadingText.textContent = "Obteniendo tu ubicación...";
-                userLocation = await getUserLocation();
+                if (useGps) {
+                    loadingText.textContent = "Obteniendo tu GPS...";
+                    userLocation = await getUserLocation();
+                } else {
+                    loadingText.textContent = "Procesando mapa...";
+                    userLocation = tempLocation;
+                }
 
                 startCompass();
                 startNewRound();
+                loadingText.style.display = 'none';
+
             } catch (error) {
                 console.error("Error:", error);
-                alert("Hubo un problema. Asegúrate de tener el GPS activado y de estar usando una conexión segura (HTTPS). Error: " + error.message);
-                document.getElementById('btn-start').style.display = 'block';
+                alert("Hubo un problema. Asegúrate de estar usando una conexión segura (HTTPS). Error: " + error.message);
                 loadingText.style.display = 'none';
             }
-        });
+        }
+
+        document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession(true));
+        document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession(false));
 
         function getUserLocation() {
             return new Promise((resolve, reject) => {
@@ -240,15 +289,16 @@
             targetPolygon = turf.circle([targetCity.lng, targetCity.lat], 20, {units: 'kilometers'});
         }
 
-        // --- SISTEMA DE COLISIÓN ANTI-ERRORES ---
+        // --- SISTEMA DE COMPROBACIÓN CON DISTANCIA DINÁMICA ---
         document.getElementById('btn-confirm').addEventListener('click', () => {
             showScreen('result');
             
-            const rayLengthKm = 4000; 
+            // Calculamos la distancia hasta la ciudad. Margen de +500km al ser un mapa nacional.
+            const distanceToTarget = turf.distance(userLocation, [targetCity.lng, targetCity.lat], {units: 'kilometers'});
+            const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
             const stepKm = 20; 
             const linePoints = [];
 
-            // 1. Crear trayectoria limitando fallos matemáticos
             for(let d = 0; d <= rayLengthKm; d += stepKm) {
                 const p = turf.rhumbDestination(userLocation, d, currentHeading, {units: 'kilometers'});
                 let lng = p.geometry.coordinates[0];
@@ -264,7 +314,6 @@
             const exactCollisionBeam = turf.lineString(linePoints);
             let isHit = false;
             
-            // 2. Colisión física contra el borde del círculo o si el jugador está dentro
             const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
             if (intersections.features.length > 0) isHit = true;
             
@@ -275,9 +324,7 @@
             if (isHit) { resultTitle.textContent = "ACERTASTE ✅"; resultTitle.style.color = "#4ade80"; } 
             else { resultTitle.textContent = "FALLASTE ❌"; resultTitle.style.color = "#f87171"; }
 
-            setTimeout(() => {
-                drawMap(exactCollisionBeam, isHit);
-            }, 100);
+            setTimeout(() => { drawMap(exactCollisionBeam, isHit); }, 100);
         });
 
         function drawMap(beamGeometry, isHit) {
