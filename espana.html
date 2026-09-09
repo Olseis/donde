@@ -99,6 +99,10 @@
     <!-- PANTALLA DE UBICACIÓN -->
     <div id="location-screen" class="screen">
         <h2 style="font-size: 1.8rem; margin-bottom: 10px; color: #E2A342;">Tu punto de partida</h2>
+        
+        <!-- BOTÓN DE UBICACIÓN GUARDADA -->
+        <button id="btn-saved-location" style="display: none; margin-bottom: 15px; width: 100%; max-width: 300px; background-color: #f59e0b; color: #000;">🔄 Usar última ubicación</button>
+
         <button id="btn-gps" style="margin-bottom: 15px; width: 100%; max-width: 300px; background-color: #10b981;">📍 Usar ubicación GPS</button>
         
         <p style="margin: 5px 0;">O marca tu posición en el mapa:</p>
@@ -196,11 +200,25 @@
         document.getElementById('btn-start').addEventListener('click', () => {
             showScreen('location');
             
+            // Leer de memoria local para auto-completar ubicación compartida
+            const savedLocStr = localStorage.getItem('dondeQueda_location');
+            let savedLoc = null;
+            if (savedLocStr) {
+                savedLoc = JSON.parse(savedLocStr);
+                tempLocation = savedLoc;
+                document.getElementById('btn-saved-location').style.display = 'block'; 
+                document.getElementById('btn-confirm-location').disabled = false; 
+            }
+
             if (!selectionMap) {
-                // Centramos el mapa sobre España para mayor comodidad
-                selectionMap = L.map('select-map-container', { zoomControl: false }).setView([40.0, -3.0], 5);
+                const startCenter = savedLoc ? [savedLoc[1], savedLoc[0]] : [40.0, -3.0];
+                selectionMap = L.map('select-map-container', { zoomControl: false }).setView(startCenter, 5);
                 L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(selectionMap);
                 
+                if (savedLoc) {
+                    selectionMarker = L.marker([savedLoc[1], savedLoc[0]]).addTo(selectionMap);
+                }
+
                 selectionMap.on('click', (ev) => {
                     tempLocation = [ev.latlng.lng, ev.latlng.lat];
                     
@@ -217,8 +235,8 @@
             setTimeout(() => selectionMap.invalidateSize(), 200); 
         });
 
-        // Inicializar el juego (GPS o Mapa)
-        async function initializeGameSession(useGps) {
+        // Inicializar el juego (GPS, Mapa o Guardado)
+        async function initializeGameSession(source) {
             const loadingText = document.getElementById('location-loading-text');
             loadingText.style.display = 'block';
 
@@ -232,12 +250,20 @@
                     }
                 }
 
-                if (useGps) {
+                if (source === 'gps') {
                     loadingText.textContent = "Obteniendo tu GPS...";
                     userLocation = await getUserLocation();
-                } else {
+                } else if (source === 'map') {
                     loadingText.textContent = "Procesando mapa...";
                     userLocation = tempLocation;
+                } else if (source === 'saved') {
+                    loadingText.textContent = "Cargando datos...";
+                    userLocation = JSON.parse(localStorage.getItem('dondeQueda_location'));
+                }
+
+                // Guardar la ubicación en la memoria del navegador para la próxima vez
+                if (userLocation) {
+                    localStorage.setItem('dondeQueda_location', JSON.stringify(userLocation));
                 }
 
                 startCompass();
@@ -251,8 +277,9 @@
             }
         }
 
-        document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession(true));
-        document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession(false));
+        document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession('gps'));
+        document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession('map'));
+        document.getElementById('btn-saved-location').addEventListener('click', () => initializeGameSession('saved'));
 
         function getUserLocation() {
             return new Promise((resolve, reject) => {
@@ -289,11 +316,9 @@
             targetPolygon = turf.circle([targetCity.lng, targetCity.lat], 20, {units: 'kilometers'});
         }
 
-        // --- SISTEMA DE COMPROBACIÓN CON DISTANCIA DINÁMICA ---
         document.getElementById('btn-confirm').addEventListener('click', () => {
             showScreen('result');
             
-            // Calculamos la distancia hasta la ciudad. Margen de +500km al ser un mapa nacional.
             const distanceToTarget = turf.distance(userLocation, [targetCity.lng, targetCity.lat], {units: 'kilometers'});
             const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
             const stepKm = 20; 
