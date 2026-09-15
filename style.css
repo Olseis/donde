@@ -1,0 +1,112 @@
+:root { 
+    --primary: #2563eb; 
+    --bg: #0f172a; 
+    --text: #f8fafc;
+    --credits-bg: #35A1A4; 
+}
+
+body, html {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    font-family: 'Limelight', cursive, sans-serif;
+    background-color: var(--bg); color: var(--text);
+    overflow: hidden; display: flex; flex-direction: column;
+}
+
+.screen {
+    display: none; flex-direction: column; align-items: center;
+    justify-content: center; width: 100%; height: 100%; text-align: center;
+    padding: 20px; box-sizing: border-box;
+}
+.active { display: flex; }
+
+/* Tipografía y textos */
+h1 { font-size: 2.2rem; margin-bottom: 5px; color: #E2A342; font-family: 'Ribeye Marrow', cursive; }
+h2 { color: #60a5fa; font-size: 1.8rem; margin: 10px 0 20px 0; }
+p { font-size: 1.1rem; max-width: 400px; line-height: 1.5; margin-bottom: 20px; }
+.logo { max-width: 250px; margin-top: 20px; }
+.loading-text { display: none; color: #34d399; font-weight: bold; margin-top: 15px; }
+
+/* Botones genéricos */
+button {
+    background-color: var(--primary); color: white; border: none; 
+    padding: 15px 30px; font-size: 1.2rem; border-radius: 8px; 
+    cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
+    margin-top: 15px; z-index: 1000; position: relative;
+    font-family: 'Limelight', cursive, sans-serif; transition: transform 0.1s;
+}
+button:active { transform: scale(0.95); }
+button:disabled { background-color: #64748b !important; cursor: not-allowed; }
+
+.btn-secondary { background-color: #4b5563; margin-top: 10px; }
+.btn-action { width: 100%; max-width: 300px; margin-bottom: 15px; margin-top: 0;}
+.btn-orange { background-color: #f59e0b; color: #000; }
+.btn-green { background-color: #10b981; }
+
+/* Menú cuadrícula */
+.menu-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    width: 100%; max-width: 350px; margin-bottom: 20px;
+}
+.btn-menu {
+    padding: 15px 10px; font-size: 1.1rem; display: flex;
+    align-items: center; justify-content: center; gap: 8px; margin: 0;
+}
+.btn-all { grid-column: span 2; background-color: #2563eb; }
+.btn-spain { grid-column: span 1; background-color: #dc2626; }
+
+/* Sección de Créditos (Flotante y Pantalla) */
+#btn-credits-float {
+    position: fixed; bottom: 20px; right: 20px;
+    width: 50px; height: 50px; border-radius: 50%;
+    padding: 0; display: flex; justify-content: center; align-items: center;
+    font-size: 1.5rem; background-color: #4b5563; margin: 0; z-index: 2500;
+}
+#credits-screen { background-color: var(--credits-bg); }
+.credits-content { font-family: Arial, sans-serif; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 12px; margin: 20px 0; }
+.credits-content p { color: #f8fafc; font-size: 1rem; margin: 10px 0;}
+.credits-content a { color: #fde047; text-decoration: none; font-weight: bold; }
+
+/* Brújula */
+.compass-container {
+    position: relative; width: 220px; height: 220px;
+    margin: 10px auto 30px auto; display: flex; 
+    align-items: center; justify-content: center;
+}
+.fixed-arrow {
+    position: absolute; top: -30px; left: 50%;
+    transform: translateX(-50%); font-size: 3rem; color: #ef4444; z-index: 10;
+}
+.compass-dial {
+    width: 100%; height: 100%; border-radius: 50%;
+    border: 4px solid #334155; background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
+    position: relative; transition: transform 0.1s ease-out; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+}
+.north-marker {
+    position: absolute; top: 10px; left: 50%;
+    transform: translateX(-50%); color: #ef4444; font-weight: bold; font-size: 1.5rem;
+}
+#debug-info { position: absolute; bottom: -30px; font-size: 1rem; color: #94a3b8; }
+
+/* Mapas y elementos UI */
+.game-header { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.target-container { display: flex; align-items: baseline; gap: 8px; justify-content: center; }
+#target-name { margin: 0; font-family: 'Ribeye Marrow', cursive; color: #E2A342; }
+
+#select-map-container { 
+    width: 100%; max-width: 400px; height: 35vh; 
+    border-radius: 8px; border: 2px solid #334155; 
+    margin-bottom: 15px; background-color: #020617; 
+}
+#map-wrapper { 
+    position: relative; width: 100%; height: 50vh; 
+    margin-bottom: 10px; border-radius: 8px; overflow: hidden; border: 2px solid #334155;
+}
+#map-container { width: 100%; height: 100%; background-color: #020617; }
+
+#offscreen-indicator {
+    position: absolute; width: 44px; height: 44px;
+    background-color: white; color: black; border-radius: 50%;
+    display: none; align-items: center; justify-content: center;
+    font-size: 1.5rem; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+    z-index: 2000; pointer-events: none; transition: transform 0.1s;
+}
