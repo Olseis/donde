@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dónde queda...</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Ribeye+Marrow&display=swap" rel="stylesheet">
+
+    <link rel="icon" type="image/png" href="../../img/logo.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="inicio"></body>
+
+<!-- BOTÓN DE CRÉDITOS FLOTANTE -->
+<button id="btn-credits-float" aria-label="Créditos">ℹ</button>
+
+<!-- PANTALLA DE INICIO -->
+<div id="start-screen" class="screen active">
+    <img src="logo.png" alt="Dónde queda..." class="logo">
+    <h1>¿Dónde queda... ?</h1>
+
+    <p>Selecciona una región para jugar:</p>
+
+    <div class="menu-grid" id="menu-container">
+        <button class="btn-menu btn-all" data-region="Todos">Todo el Mundo</button>
+        <button class="btn-menu" data-region="América">América</button>
+        <button class="btn-menu" data-region="Europa">Europa</button>
+        <button class="btn-menu" data-region="Asia">Asia</button>
+        <button class="btn-menu" data-region="África">África</button>
+        <button class="btn-menu" data-region="Oceanía">Oceanía</button>
+        <button class="btn-menu btn-spain" data-region="España">🇪🇸 España</button>
+    </div>
+
+    <p id="start-loading-text" class="loading-text">Cargando mapa mundial...</p>
+</div>
+
+
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+
+<!-- Archivos Modulares -->
+<script src="../JS/data.js"></script>
+<script src="../JS/app.js"></script>
+</body>
+
+</html>

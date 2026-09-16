@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="../../img/logo.png">
+</head>
+
+<body data-page="juego">
+  <!-- PANTALLA DE JUEGO (BRÚJULA) -->
+  <div id="game-screen" class="screen">
+    <div class="game-header">
+      <h3>¿Dónde queda</h3>
+      <div class="target-container">
+        <h2 id="target-name">Cargando...</h2>
+        <h3>?</h3>
+      </div>
+    </div>
+
+    <div class="compass-container">
+      <div class="fixed-arrow">⬆</div>
+      <div id="compass-dial" class="compass-dial">
+        <div class="north-marker">N</div>
+      </div>
+      <div id="debug-info">Azimut: Esperando...</div>
+    </div>
+
+    <button id="btn-confirm">Comprobar</button>
+  </div>
+
+  <!-- Archivos Modulares -->
+  <script src="../JS/app.js"></script>
+  <script src="../JS/data.js"></script>
+
+</body>
+
+</html>
