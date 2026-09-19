@@ -215,7 +215,7 @@ async function initializeGameSession(source) {
         
     } catch (error) {
         console.error("Error:", error);
-        alert("Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación. Error: " + error.message);
+        alert("Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación.");
         UI.locLoading.style.display = 'none';
     }
 }
