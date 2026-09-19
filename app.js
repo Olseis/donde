@@ -41,6 +41,7 @@ const UI = {
     debugInfo: document.getElementById('debug-info'),
     targetName: document.getElementById('target-name'),
     resultTitle: document.getElementById('result-title'),
+    resultErrorDetails: document.getElementById('result-error-details'),
     indicator: document.getElementById('offscreen-indicator')
 };
 
@@ -214,7 +215,7 @@ async function initializeGameSession(source) {
         
     } catch (error) {
         console.error("Error:", error);
-        alert("Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación.");
+        alert("Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación. Error: " + error.message);
         UI.locLoading.style.display = 'none';
     }
 }
@@ -256,6 +257,7 @@ function handleOrientation(event) {
    ======================================= */
 function startNewRound() {
     showScreen('game');
+    UI.resultErrorDetails.style.display = 'none';
     
     if (state.mode === 'spain') {
         state.targetData = citiesData[Math.floor(Math.random() * citiesData.length)];
@@ -265,7 +267,6 @@ function startNewRound() {
         const validCountries = state.countriesGeoJSON.features.filter(f => {
             const inDict = dictionary[f.id];
             if (!inDict) return false;
-            // Evitar que aparezca España en la selección si estamos en "Todos"
             if (state.continent === "Todos" && f.id === "ESP") return false;
             
             if (state.continent === "Todos") return true;
@@ -284,9 +285,12 @@ document.getElementById('btn-confirm').addEventListener('click', () => {
     
     let isHit = false;
     let exactCollisionBeam = null;
+    let errorCurve = null;
 
     if (state.mode === 'spain') {
         const targetPolygon = turf.circle([state.targetData.lng, state.targetData.lat], 20, {units: 'kilometers'});
+        state.targetData.polygonGeometry = targetPolygon;
+
         const distanceToTarget = turf.distance(state.userLocation, [state.targetData.lng, state.targetData.lat], {units: 'kilometers'});
         const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
         
@@ -298,9 +302,6 @@ document.getElementById('btn-confirm').addEventListener('click', () => {
         
         const startPoint = turf.point(linePoints[0]);
         if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
-        
-        // Guardamos el polígono en targetData para usarlo al dibujar
-        state.targetData.polygonGeometry = targetPolygon;
 
     } else {
         const distanceToTarget = turf.distance(state.userLocation, [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat], {units: 'kilometers'});
@@ -325,12 +326,65 @@ document.getElementById('btn-confirm').addEventListener('click', () => {
     if (isHit) { 
         UI.resultTitle.textContent = "ACERTASTE ✅"; 
         UI.resultTitle.style.color = "#4ade80"; 
+        UI.resultErrorDetails.style.display = 'none';
     } else { 
         UI.resultTitle.textContent = "FALLASTE ❌"; 
         UI.resultTitle.style.color = "#f87171"; 
+
+        // 1. Calcular ángulo de error hacia el centro
+        const idealBearing = turf.bearing(state.userLocation, [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat]);
+        let headingNorm = state.currentHeading % 360;
+        let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
+        
+        let errorAngle = Math.abs(headingNorm - bearingNorm);
+        if (errorAngle > 180) errorAngle = 360 - errorAngle;
+        
+        // 2. Calcular distancia mínima y extraer los puntos más cercanos para la curva
+        let minDistance = Infinity;
+        let closestLinePt = null;
+        let closestCountryPt = null;
+        
+        let targetGeom = state.mode === 'spain' ? state.targetData.polygonGeometry : state.targetData;
+        const vertices = turf.explode(targetGeom);
+        const linesToTest = exactCollisionBeam.type === 'FeatureCollection' ? exactCollisionBeam.features : [exactCollisionBeam];
+        
+        turf.featureEach(vertices, function(pointFeature) {
+            linesToTest.forEach(line => {
+                const nearest = turf.nearestPointOnLine(line, pointFeature, {units: 'kilometers'});
+                const dist = nearest.properties.dist;
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestLinePt = nearest;
+                    closestCountryPt = pointFeature;
+                }
+            });
+        });
+
+        // 3. Crear línea curva hacia el objetivo si encontramos puntos cercanos
+        if (closestLinePt && closestCountryPt) {
+            const pt1 = closestLinePt.geometry.coordinates;
+            let pt2 = closestCountryPt.geometry.coordinates;
+            
+            // Ajustar coordenadas para curvas que pasen por el antimeridiano
+            if (pt1[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
+            else if (pt2[0] - pt1[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
+
+            const mid = turf.midpoint(pt1, pt2);
+            const brg = turf.bearing(pt1, pt2);
+            const dist = turf.distance(pt1, pt2, {units: 'kilometers'});
+            
+            // Offset para generar el arco curvado visualmente
+            const offset = turf.destination(mid, dist * 0.25, brg - 90, {units: 'kilometers'});
+            const arcLine = turf.lineString([pt1, offset.geometry.coordinates, pt2]);
+            
+            errorCurve = turf.bezierSpline(arcLine, {resolution: 10000, sharpness: 0.8});
+        }
+
+        UI.resultErrorDetails.innerHTML = `Desvío: <b>${Math.round(errorAngle)}°</b> | Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
+        UI.resultErrorDetails.style.display = 'block';
     }
 
-    setTimeout(() => { drawResultMap(exactCollisionBeam, isHit); }, 100);
+    setTimeout(() => { drawResultMap(exactCollisionBeam, isHit, errorCurve); }, 100);
 });
 
 /* =======================================
@@ -375,7 +429,7 @@ function breakLinesOnMeridian(linePoints) {
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
    ======================================= */
-function drawResultMap(beamGeometry, isHit) {
+function drawResultMap(beamGeometry, isHit, errorCurve = null) {
     if (!state.resultMap) { 
         state.resultMap = L.map('map-container', { zoomControl: false, attributionControl: false }); 
         state.resultMapLayers = L.featureGroup().addTo(state.resultMap); 
@@ -418,10 +472,17 @@ function drawResultMap(beamGeometry, isHit) {
         state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
     }
 
-    // Dibujar el rayo y al usuario (común en ambos)
+    // Dibujar el rayo de orientación con el color correspondiente (Verde o Rojo)
     L.geoJSON(beamGeometry, {
-        style: { color: isHit ? '#facc15' : '#64748b', weight: 5, opacity: 0.8 }
+        style: { color: isHit ? '#4ade80' : '#f87171', weight: 5, opacity: 0.8 }
     }).addTo(state.resultMapLayers);
+
+    // Si hay línea curva de error, la dibujamos en amarillo punteado
+    if (errorCurve) {
+        L.geoJSON(errorCurve, {
+            style: { color: '#f87171', weight: 3, dashArray: '6, 6', opacity: 0.9 }
+        }).addTo(state.resultMapLayers);
+    }
 
     L.circleMarker([state.userLocation[1], state.userLocation[0]], {
         radius: state.mode === 'spain' ? 6 : 5, 

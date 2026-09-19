@@ -25,6 +25,7 @@ h2 { color: #60a5fa; font-size: 1.8rem; margin: 10px 0 20px 0; }
 p { font-size: 1.1rem; max-width: 400px; line-height: 1.5; margin-bottom: 20px; }
 .logo { max-width: 250px; margin-top: 20px; }
 .loading-text { display: none; color: #34d399; font-weight: bold; margin-top: 15px; }
+.error-details { font-size: 1.1rem; color: #facc15; margin: 0 0 10px 0; font-family: Arial, sans-serif; }
 
 /* Botones genéricos */
 button {
