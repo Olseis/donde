@@ -132,6 +132,8 @@ document.querySelectorAll('.btn-menu').forEach(btn => {
         state.continent = region === "España" ? "Todos" : region;
 
         if (UI.toggleVersus.checked) {
+            UI.inputP1.value = "";
+            UI.inputP2.value = "";
             showScreen('names');
         } else {
             state.isVersus = false;
