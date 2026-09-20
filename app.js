@@ -7,10 +7,16 @@ const state = {
     userLocation: null,
     tempLocation: null,
     currentHeading: 0,
-    targetData: null, // Guardará la ciudad (spain) o el polígono geojson (world)
-    targetCenterLatLng: null, // Para el indicador
+    targetData: null, 
+    targetCenterLatLng: null, 
     countriesGeoJSON: null,
     
+    // Variables Modo Versus
+    isVersus: false,
+    players: [{name: '', score: 0}, {name: '', score: 0}],
+    currentPlayerIdx: 0,
+    turn: 1, // Max 10 (5 por jugador)
+
     // Elementos de mapas
     selectionMap: null,
     selectionMarker: null,
@@ -24,25 +30,55 @@ const state = {
 const screens = {
     start: document.getElementById('start-screen'),
     credits: document.getElementById('credits-screen'),
+    names: document.getElementById('names-screen'),
+    leaderboard: document.getElementById('leaderboard-screen'),
     location: document.getElementById('location-screen'),
     game: document.getElementById('game-screen'),
     result: document.getElementById('result-screen')
 };
 
 const UI = {
+    // Menú Principal y Extras
     btnCredits: document.getElementById('btn-credits-float'),
     btnCreditsBack: document.getElementById('btn-back-credits'),
     menuContainer: document.getElementById('menu-container'),
     startLoading: document.getElementById('start-loading-text'),
+    toggleVersus: document.getElementById('toggle-versus'),
+    btnShowScores: document.getElementById('btn-show-scores'),
+    
+    // Pantalla Nombres Versus
+    inputP1: document.getElementById('input-p1'),
+    inputP2: document.getElementById('input-p2'),
+    btnConfirmNames: document.getElementById('btn-confirm-names'),
+    btnBackNames: document.getElementById('btn-back-names'),
+    
+    // Pantalla Leaderboard
+    leaderboardList: document.getElementById('leaderboard-list'),
+    endgameActions: document.getElementById('endgame-actions'),
+    standardActions: document.getElementById('standard-actions'),
+    btnBackLeaderboard: document.getElementById('btn-back-leaderboard'),
+    btnClearScores: document.getElementById('btn-clear-scores'),
+    btnVersusRestart: document.getElementById('btn-versus-restart'),
+    btnVersusExit: document.getElementById('btn-versus-exit'),
+    
+    // Pantalla Ubicación
     btnSavedLoc: document.getElementById('btn-saved-location'),
     btnConfirmLoc: document.getElementById('btn-confirm-location'),
+    btnBackLoc: document.getElementById('btn-back-loc'),
     locLoading: document.getElementById('location-loading-text'),
+    
+    // Pantalla Juego
+    currentPlayerDisplay: document.getElementById('current-player-display'),
     compassDial: document.getElementById('compass-dial'),
     debugInfo: document.getElementById('debug-info'),
     targetName: document.getElementById('target-name'),
+    
+    // Pantalla Resultados
     resultTitle: document.getElementById('result-title'),
+    turnPointsDisplay: document.getElementById('turn-points-display'),
     resultErrorDetails: document.getElementById('result-error-details'),
-    indicator: document.getElementById('offscreen-indicator')
+    btnRestart: document.getElementById('btn-restart'),
+    btnChangeRegion: document.getElementById('btn-change-region')
 };
 
 /* =======================================
@@ -56,8 +92,35 @@ function showScreen(screenName) {
     UI.btnCredits.style.display = screenName === 'start' ? 'flex' : 'none';
 }
 
+function returnToMenu() {
+    UI.menuContainer.style.display = 'grid';
+    showScreen('start');
+}
+
+// Toggle botón Puntuaciones
+UI.toggleVersus.addEventListener('change', (e) => {
+    UI.btnShowScores.style.display = e.target.checked ? 'block' : 'none';
+});
+
 UI.btnCredits.addEventListener('click', () => showScreen('credits'));
-UI.btnCreditsBack.addEventListener('click', () => showScreen('start'));
+UI.btnCreditsBack.addEventListener('click', returnToMenu);
+UI.btnBackNames.addEventListener('click', returnToMenu);
+UI.btnBackLeaderboard.addEventListener('click', returnToMenu);
+
+UI.btnBackLoc.addEventListener('click', () => { 
+    state.isVersus = false; 
+    returnToMenu(); 
+});
+
+UI.btnChangeRegion.addEventListener('click', () => {
+    state.isVersus = false;
+    returnToMenu();
+});
+
+UI.btnVersusExit.addEventListener('click', () => {
+    state.isVersus = false;
+    returnToMenu();
+});
 
 // Seleccionador del Menú
 document.querySelectorAll('.btn-menu').forEach(btn => {
@@ -65,44 +128,52 @@ document.querySelectorAll('.btn-menu').forEach(btn => {
         const region = e.target.dataset.region;
         if (!region) return;
 
-        if (region === "España") {
-            state.mode = 'spain';
-            prepareLocationScreen();
-        } else {
-            state.mode = 'world';
-            state.continent = region;
-            
-            UI.menuContainer.style.display = 'none';
-            UI.startLoading.style.display = 'block';
+        state.mode = region === "España" ? 'spain' : 'world';
+        state.continent = region === "España" ? "Todos" : region;
 
-            if (!state.countriesGeoJSON) {
-                try {
-                    let geoRes = await fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json');
-                    state.countriesGeoJSON = await geoRes.json();
-                } catch (error) {
-                    alert("Error al descargar mapas. Revisa tu conexión.");
-                    UI.menuContainer.style.display = 'grid';
-                    UI.startLoading.style.display = 'none';
-                    return;
-                }
-            }
-            
-            UI.startLoading.style.display = 'none';
-            prepareLocationScreen();
+        if (UI.toggleVersus.checked) {
+            showScreen('names');
+        } else {
+            state.isVersus = false;
+            await loadAssetsAndPrepareLoc();
         }
     });
 });
 
-document.getElementById('btn-change-region').addEventListener('click', () => {
-    UI.indicator.style.display = 'none';
-    UI.menuContainer.style.display = 'grid'; 
-    showScreen('start');
+UI.btnConfirmNames.addEventListener('click', async () => {
+    const p1 = UI.inputP1.value.trim() || "Jugador 1";
+    const p2 = UI.inputP2.value.trim() || "Jugador 2";
+    
+    state.isVersus = true;
+    state.players = [{name: p1, score: 0}, {name: p2, score: 0}];
+    state.currentPlayerIdx = 0;
+    state.turn = 1;
+    
+    await loadAssetsAndPrepareLoc();
 });
 
-document.getElementById('btn-restart').addEventListener('click', () => {
-    UI.indicator.style.display = 'none';
-    startNewRound();
-});
+async function loadAssetsAndPrepareLoc() {
+    if (state.mode === 'world') {
+        UI.menuContainer.style.display = 'none';
+        if(state.isVersus) screens.names.classList.remove('active');
+        screens.start.classList.add('active');
+        UI.startLoading.style.display = 'block';
+
+        if (!state.countriesGeoJSON) {
+            try {
+                let geoRes = await fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json');
+                state.countriesGeoJSON = await geoRes.json();
+            } catch (error) {
+                alert("Error al descargar mapas. Revisa tu conexión.");
+                UI.menuContainer.style.display = 'grid';
+                UI.startLoading.style.display = 'none';
+                return;
+            }
+        }
+        UI.startLoading.style.display = 'none';
+    }
+    prepareLocationScreen();
+}
 
 /* =======================================
    PREPARACIÓN Y SELECCIÓN DE UBICACIÓN
@@ -126,7 +197,6 @@ function prepareLocationScreen() {
         
         state.selectionMap = L.map('select-map-container', { zoomControl: false, attributionControl: false }).setView(startCenter, startZoom);
         
-        // Asignar los estilos según el modo
         if (state.mode === 'spain') {
             L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.selectionMap);
         } else {
@@ -154,7 +224,6 @@ function prepareLocationScreen() {
             UI.btnConfirmLoc.disabled = false;
         });
     } else {
-        // Limpiar el mapa existente y rehacer la vista si cambiamos de modo
         state.selectionMap.eachLayer((layer) => state.selectionMap.removeLayer(layer));
         const center = savedLoc ? [savedLoc[1], savedLoc[0]] : (state.mode === 'spain' ? [40.0, -3.0] : [20, 0]);
         const zoom = savedLoc ? (state.mode === 'spain' ? 5 : 4) : (state.mode === 'spain' ? 5 : 1);
@@ -258,6 +327,14 @@ function handleOrientation(event) {
 function startNewRound() {
     showScreen('game');
     UI.resultErrorDetails.style.display = 'none';
+    UI.turnPointsDisplay.style.display = 'none';
+
+    if (state.isVersus) {
+        UI.currentPlayerDisplay.textContent = `Turno de ${state.players[state.currentPlayerIdx].name}`;
+        UI.currentPlayerDisplay.style.display = 'block';
+    } else {
+        UI.currentPlayerDisplay.style.display = 'none';
+    }
     
     if (state.mode === 'spain') {
         state.targetData = citiesData[Math.floor(Math.random() * citiesData.length)];
@@ -268,7 +345,6 @@ function startNewRound() {
             const inDict = dictionary[f.id];
             if (!inDict) return false;
             if (state.continent === "Todos" && f.id === "ESP") return false;
-            
             if (state.continent === "Todos") return true;
             return inDict.continent === state.continent;
         });
@@ -285,7 +361,7 @@ document.getElementById('btn-confirm').addEventListener('click', () => {
     
     let isHit = false;
     let exactCollisionBeam = null;
-    let errorCurve = null;
+    let errorLine = null;
 
     if (state.mode === 'spain') {
         const targetPolygon = turf.circle([state.targetData.lng, state.targetData.lat], 20, {units: 'kilometers'});
@@ -323,68 +399,158 @@ document.getElementById('btn-confirm').addEventListener('click', () => {
         });
     }
 
+    // Calcular error de rumbo para sistema de puntuación
+    const idealBearing = turf.bearing(state.userLocation, [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat]);
+    let headingNorm = state.currentHeading % 360;
+    let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
+    
+    let errorAngle = Math.abs(headingNorm - bearingNorm);
+    if (errorAngle > 180) errorAngle = 360 - errorAngle;
+
+    let turnPoints = 0;
+
     if (isHit) { 
         UI.resultTitle.textContent = "ACERTASTE ✅"; 
         UI.resultTitle.style.color = "#4ade80"; 
         UI.resultErrorDetails.style.display = 'none';
+        turnPoints = 100;
     } else { 
         UI.resultTitle.textContent = "FALLASTE ❌"; 
         UI.resultTitle.style.color = "#f87171"; 
+        
+        // Puntuación si fallas pero aciertas el cuadrante
+        if (errorAngle <= 90) turnPoints = Math.round(75 * (1 - (errorAngle / 90)));
+        else turnPoints = 0;
 
-        // 1. Calcular ángulo de error hacia el centro
-        const idealBearing = turf.bearing(state.userLocation, [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat]);
-        let headingNorm = state.currentHeading % 360;
-        let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
-        
-        let errorAngle = Math.abs(headingNorm - bearingNorm);
-        if (errorAngle > 180) errorAngle = 360 - errorAngle;
-        
-        // 2. Calcular distancia mínima y extraer los puntos más cercanos para la curva
         let minDistance = Infinity;
-        let closestLinePt = null;
         let closestCountryPt = null;
         
         let targetGeom = state.mode === 'spain' ? state.targetData.polygonGeometry : state.targetData;
         const vertices = turf.explode(targetGeom);
-        const linesToTest = exactCollisionBeam.type === 'FeatureCollection' ? exactCollisionBeam.features : [exactCollisionBeam];
+        const userPt = turf.point(state.userLocation);
         
         turf.featureEach(vertices, function(pointFeature) {
-            linesToTest.forEach(line => {
-                const nearest = turf.nearestPointOnLine(line, pointFeature, {units: 'kilometers'});
-                const dist = nearest.properties.dist;
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    closestLinePt = nearest;
-                    closestCountryPt = pointFeature;
-                }
-            });
+            const dist = turf.distance(userPt, pointFeature, {units: 'kilometers'});
+            if (dist < minDistance) {
+                minDistance = dist;
+                closestCountryPt = pointFeature;
+            }
         });
 
-        // 3. Crear línea curva hacia el objetivo si encontramos puntos cercanos
-        if (closestLinePt && closestCountryPt) {
-            const pt1 = closestLinePt.geometry.coordinates;
+        if (closestCountryPt) {
             let pt2 = closestCountryPt.geometry.coordinates;
-            
-            // Ajustar coordenadas para curvas que pasen por el antimeridiano
-            if (pt1[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
-            else if (pt2[0] - pt1[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
-
-            const mid = turf.midpoint(pt1, pt2);
-            const brg = turf.bearing(pt1, pt2);
-            const dist = turf.distance(pt1, pt2, {units: 'kilometers'});
-            
-            // Offset para generar el arco curvado visualmente
-            const offset = turf.destination(mid, dist * 0.25, brg - 90, {units: 'kilometers'});
-            const arcLine = turf.lineString([pt1, offset.geometry.coordinates, pt2]);
-            
-            errorCurve = turf.bezierSpline(arcLine, {resolution: 10000, sharpness: 0.8});
+            if (state.userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
+            else if (pt2[0] - state.userLocation[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
+            errorLine = turf.lineString([state.userLocation, pt2]);
         }
 
-        UI.resultErrorDetails.innerHTML = `Desvío: <b>${Math.round(errorAngle)}°</b> | Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
+        UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
         UI.resultErrorDetails.style.display = 'block';
     }
 
-    setTimeout(() => { drawResultMap(exactCollisionBeam, isHit, errorCurve); }, 100);
+    if (state.isVersus) {
+        state.players[state.currentPlayerIdx].score += turnPoints;
+        UI.turnPointsDisplay.textContent = `+${turnPoints} Puntos`;
+        UI.turnPointsDisplay.style.display = 'block';
+        
+        if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
+        else UI.btnRestart.textContent = "Siguiente Turno";
+    } else {
+        UI.btnRestart.textContent = "Siguiente Destino";
+    }
+
+    setTimeout(() => { drawResultMap(exactCollisionBeam, isHit, errorLine); }, 100);
+});
+
+UI.btnRestart.addEventListener('click', () => {
+    if (state.isVersus) {
+        if (state.turn >= 10) {
+            saveScores();
+            renderLeaderboard(true);
+            showScreen('leaderboard');
+        } else {
+            state.turn++;
+            state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2;
+            startNewRound();
+        }
+    } else {
+        startNewRound();
+    }
+});
+
+/* =======================================
+   LEADERBOARD Y PUNTUACIONES
+   ======================================= */
+function saveScores() {
+    let scores = JSON.parse(localStorage.getItem('dondeQueda_scores')) || {};
+    state.players.forEach(p => {
+        let nameToSave = p.name.trim();
+        if(nameToSave === "") return;
+        
+        // Busca si el jugador existe ignorando mayúsculas/minúsculas
+        let existingKey = Object.keys(scores).find(k => k.toLowerCase() === nameToSave.toLowerCase());
+        let keyToUse = existingKey || nameToSave; 
+        
+        if (!scores[keyToUse] || p.score > scores[keyToUse]) {
+            scores[keyToUse] = p.score;
+        }
+    });
+    localStorage.setItem('dondeQueda_scores', JSON.stringify(scores));
+}
+
+function renderLeaderboard(isEndGame = false) {
+    UI.leaderboardList.innerHTML = '';
+    let scores = JSON.parse(localStorage.getItem('dondeQueda_scores')) || {};
+    let sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    
+    let lowestHighlightedNode = null;
+
+    sortedScores.forEach(([name, score], index) => {
+        let li = document.createElement('li');
+        li.innerHTML = `<span>${index + 1}. ${name}</span><span>${score}</span>`;
+        
+        // Match ignorando mayúsculas para resaltar al final de la partida
+        if (isEndGame && state.players.some(p => p.name.trim().toLowerCase() === name.toLowerCase())) {
+            li.classList.add('highlight-gold');
+            lowestHighlightedNode = li;
+        }
+        
+        UI.leaderboardList.appendChild(li);
+    });
+
+    if (isEndGame) {
+        UI.endgameActions.style.display = 'block';
+        UI.standardActions.style.display = 'none';
+        
+        if (lowestHighlightedNode) {
+            setTimeout(() => { 
+                lowestHighlightedNode.scrollIntoView({behavior: 'smooth', block: 'nearest'}); 
+            }, 200);
+        }
+    } else {
+        UI.endgameActions.style.display = 'none';
+        UI.standardActions.style.display = 'block';
+    }
+}
+
+UI.btnShowScores.addEventListener('click', () => {
+    renderLeaderboard(false);
+    showScreen('leaderboard');
+});
+
+UI.btnClearScores.addEventListener('click', () => {
+    if (confirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.")) {
+        localStorage.removeItem('dondeQueda_scores');
+        renderLeaderboard(false);
+    }
+});
+
+UI.btnVersusRestart.addEventListener('click', () => {
+    state.turn = 1;
+    state.currentPlayerIdx = 0;
+    state.players[0].score = 0;
+    state.players[1].score = 0;
+    startNewRound();
 });
 
 /* =======================================
@@ -429,7 +595,7 @@ function breakLinesOnMeridian(linePoints) {
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
    ======================================= */
-function drawResultMap(beamGeometry, isHit, errorCurve = null) {
+function drawResultMap(beamGeometry, isHit, errorLine = null) {
     if (!state.resultMap) { 
         state.resultMap = L.map('map-container', { zoomControl: false, attributionControl: false }); 
         state.resultMapLayers = L.featureGroup().addTo(state.resultMap); 
@@ -438,7 +604,6 @@ function drawResultMap(beamGeometry, isHit, errorCurve = null) {
     state.resultMap.invalidateSize();
     state.resultMapLayers.clearLayers();
     
-    // Si la anterior vez se cargaron tiles o polígonos base, limpiamos todas las capas subyacentes.
     state.resultMap.eachLayer(layer => {
         if (layer !== state.resultMapLayers) state.resultMap.removeLayer(layer);
     });
@@ -472,15 +637,13 @@ function drawResultMap(beamGeometry, isHit, errorCurve = null) {
         state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
     }
 
-    // Dibujar el rayo de orientación con el color correspondiente (Verde o Rojo)
     L.geoJSON(beamGeometry, {
         style: { color: isHit ? '#4ade80' : '#f87171', weight: 5, opacity: 0.8 }
     }).addTo(state.resultMapLayers);
 
-    // Si hay línea curva de error, la dibujamos en amarillo punteado
-    if (errorCurve) {
-        L.geoJSON(errorCurve, {
-            style: { color: '#f87171', weight: 3, dashArray: '6, 6', opacity: 0.9 }
+    if (errorLine) {
+        L.geoJSON(errorLine, {
+            style: { color: '#facc15', weight: 3, dashArray: '6, 6', opacity: 0.9 }
         }).addTo(state.resultMapLayers);
     }
 
@@ -488,40 +651,4 @@ function drawResultMap(beamGeometry, isHit, errorCurve = null) {
         radius: state.mode === 'spain' ? 6 : 5, 
         fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
     }).addTo(state.resultMapLayers);
-
-    setupOffscreenIndicator();
-}
-
-/* =======================================
-   INDICADOR FUERA DE PANTALLA
-   ======================================= */
-function setupOffscreenIndicator() {
-    state.resultMap.off('move'); 
-    state.resultMap.on('move', () => updateIndicatorPosition());
-    updateIndicatorPosition(); 
-}
-
-function updateIndicatorPosition() {
-    const bounds = state.resultMap.getBounds();
-    if (bounds.contains(state.targetCenterLatLng)) { 
-        UI.indicator.style.display = 'none'; 
-        return; 
-    }
-    
-    UI.indicator.style.display = 'flex';
-    
-    const centerPixel = state.resultMap.latLngToContainerPoint(state.resultMap.getCenter());
-    const targetPixel = state.resultMap.latLngToContainerPoint(state.targetCenterLatLng);
-    const angleRad = Math.atan2(targetPixel.y - centerPixel.y, targetPixel.x - centerPixel.x);
-    UI.indicator.style.transform = `rotate(${angleRad * (180 / Math.PI)}deg)`;
-
-    const rect = document.getElementById('map-wrapper').getBoundingClientRect();
-    const radiusX = (rect.width / 2) - 25, radiusY = (rect.height / 2) - 25;
-    let x = Math.cos(angleRad) * radiusX, y = Math.sin(angleRad) * radiusY;
-
-    if (Math.abs(x) > radiusX) { x = Math.sign(x) * radiusX; y = x * Math.tan(angleRad); }
-    if (Math.abs(y) > radiusY) { y = Math.sign(y) * radiusY; x = y / Math.tan(angleRad); }
-
-    UI.indicator.style.left = `calc(50% + ${x}px - 22px)`; 
-    UI.indicator.style.top = `calc(50% + ${y}px - 22px)`;
 }

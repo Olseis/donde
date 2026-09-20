@@ -36,11 +36,51 @@
         </div>
         
         <p id="start-loading-text" class="loading-text">Cargando mapa mundial...</p>
+
+        <!-- CONTROLES MODO VERSUS -->
+        <div class="versus-container" id="versus-controls">
+            <div class="versus-toggle-group">
+                <span>Versus</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-versus">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <button id="btn-show-scores" class="btn-secondary btn-small" style="display: none;">Puntuaciones</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE NOMBRES VERSUS -->
+    <div id="names-screen" class="screen">
+        <h2 style="color: #E2A342;">Nombres de los Jugadores</h2>
+        <input type="text" id="input-p1" placeholder="Jugador 1" class="name-input" autocomplete="off">
+        <input type="text" id="input-p2" placeholder="Jugador 2" class="name-input" autocomplete="off">
+        <button id="btn-confirm-names">Confirmar Nombres</button>
+        <button id="btn-back-names" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE PUNTUACIONES (LEADERBOARD) -->
+    <div id="leaderboard-screen" class="screen">
+        <h2 style="color: #E2A342; font-family: 'Ribeye Marrow', cursive;">Tabla de Puntuaciones</h2>
+        
+        <ul id="leaderboard-list" class="leaderboard-list"></ul>
+        
+        <!-- Botones al terminar partida Versus -->
+        <div id="endgame-actions" style="display: none; width: 100%; max-width: 350px;">
+            <button id="btn-versus-restart" style="width: 100%;">Reiniciar Partida</button>
+            <button id="btn-versus-exit" class="btn-secondary" style="width: 100%;">Salir al Menú</button>
+        </div>
+        
+        <!-- Botones estándar del menú -->
+        <div id="standard-actions" style="width: 100%; max-width: 350px;">
+            <button id="btn-back-leaderboard" class="btn-secondary" style="width: 100%;">Volver</button>
+            <button id="btn-clear-scores" style="background-color: #ef4444; width: 100%;">Borrar Datos</button>
+        </div>
     </div>
 
     <!-- PANTALLA DE CRÉDITOS -->
     <div id="credits-screen" class="screen">
-        <img src="logo.png" alt="Dónde queda..." class="logo">
+        <img src="OlseisLogoMonocromatico.png" alt="Dónde queda..." class="logo">
         <div class="credits-content">
             <h2 style="color: #fff; font-family: 'Ribeye Marrow', cursive;">Créditos</h2>
             <p>Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.</p>
@@ -62,11 +102,13 @@
         <div id="select-map-container"></div>
         
         <button id="btn-confirm-location" disabled>Confirmar Mapa</button>
+        <button id="btn-back-loc" class="btn-secondary" style="margin-top: 15px;">Volver</button>
         <p id="location-loading-text" class="loading-text"></p>
     </div>
 
     <!-- PANTALLA DE JUEGO (BRÚJULA) -->
     <div id="game-screen" class="screen">
+        <h2 id="current-player-display" style="display: none; color: #E2A342; font-family: 'Ribeye Marrow', cursive; margin: 0 0 15px 0; font-size: 2.2rem;"></h2>
         <div class="game-header">
             <h3>¿Dónde queda</h3>
             <div class="target-container">
@@ -87,13 +129,13 @@
     <!-- PANTALLA DE RESULTADO -->
     <div id="result-screen" class="screen">
         <h1 id="result-title">Analizando...</h1>
+        <h2 id="turn-points-display" style="display: none; color: #facc15; margin: 0 0 10px 0; font-family: 'Ribeye Marrow', cursive;"></h2>
         <p id="result-error-details" class="error-details" style="display: none;"></p>
         <div id="map-wrapper">
             <div id="map-container"></div>
-            <div id="offscreen-indicator">➔</div>
         </div>
         <button id="btn-restart">Siguiente Destino</button>
-        <button id="btn-change-region" class="btn-secondary">Cambiar Región</button>
+        <button id="btn-change-region" class="btn-secondary">Volver</button>
     </div>
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
