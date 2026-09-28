@@ -1,0 +1,27 @@
+# Normalizar saltos de línea automáticamente
+* text=auto
+
+# Scripts de Mac/Linux: siempre LF
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Scripts de Windows: siempre CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Archivos binarios: Git no los toca
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.jar binary
+*.jks binary
+*.keystore binary
