@@ -22,16 +22,38 @@ android/app/debug/
 *.apk
 *.aab
 
-# ===== Capacitor: copias generadas por "npx cap sync" =====
+# ===== Android: copias generadas por "npx cap sync" =====
 android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/capacitor-cordova-android-plugins/
 
-# ===== Claves de firma (NUNCA subirlas) =====
+# ===== iOS: dependencias y compilaciones =====
+ios/App/Pods/
+ios/DerivedData/
+ios/build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ===== iOS: copias generadas por "npx cap sync" =====
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/capacitor-cordova-ios-plugins/
+
+# ===== Xcode: archivos de usuario =====
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# ===== Claves y certificados (NUNCA subirlos) =====
 *.jks
 *.keystore
 keystore.properties
+*.p12
+*.cer
+*.mobileprovision
 
 # ===== Sistema operativo =====
 .DS_Store

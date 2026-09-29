@@ -1,4 +1,6 @@
 @echo off
+rem Configuracion inicial del proyecto (Windows, solo Android)
+rem Uso: doble clic en setup.bat
 setlocal
 cd /d "%~dp0"
 echo ============================================
@@ -19,6 +21,8 @@ if not exist "www\index.html" (
   pause
   exit /b 1
 )
+
+git config --global core.longpaths true >nul 2>nul
 
 echo [1/4] Instalando dependencias...
 call npm install
@@ -57,6 +61,8 @@ echo [4/4] Sincronizando el juego con Android...
 call npx cap sync android
 if errorlevel 1 goto error
 
+echo.
+echo Nota: iOS solo se puede compilar en Mac, usa setup.sh alli.
 echo.
 echo ============================================
 echo   Listo

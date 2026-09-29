@@ -1,4 +1,4 @@
-export const dictionary = {
+const dictionary = {
     "ARG": { name: "Argentina", continent: "América" }, "BOL": { name: "Bolivia", continent: "América" }, 
     "BRA": { name: "Brasil", continent: "América" }, "CHL": { name: "Chile", continent: "América" }, 
     "COL": { name: "Colombia", continent: "América" }, "CRI": { name: "Costa Rica", continent: "América" },

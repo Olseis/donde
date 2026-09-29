@@ -9,6 +9,13 @@ gradlew text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# Proyecto de Xcode: siempre LF
+*.pbxproj text eol=lf
+*.plist text eol=lf
+*.storyboard text eol=lf
+*.xcscheme text eol=lf
+*.swift text eol=lf
+
 # Archivos binarios: Git no los toca
 *.png binary
 *.jpg binary
@@ -16,12 +23,17 @@ gradlew text eol=lf
 *.gif binary
 *.webp binary
 *.ico binary
+*.icns binary
 *.mp3 binary
 *.ogg binary
 *.wav binary
+*.m4a binary
 *.ttf binary
+*.otf binary
 *.woff binary
 *.woff2 binary
 *.jar binary
 *.jks binary
 *.keystore binary
+*.p12 binary
+*.mobileprovision binary
