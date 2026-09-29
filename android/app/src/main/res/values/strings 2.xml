@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Donde Queda</string>
-    <string name="title_activity_main">Donde Queda</string>
-    <string name="package_name">com.dondequeda.dondequeda</string>
-    <string name="custom_url_scheme">com.dondequeda.dondequeda</string>
-</resources>
