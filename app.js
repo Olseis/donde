@@ -11,6 +11,10 @@ const state = {
     targetCenterLatLng: null, 
     countriesGeoJSON: null,
     
+    // Variables de corrección de brújula
+    lastHeading: null,
+    totalRotation: 0,
+    
     // Variables Modo Versus
     isVersus: false,
     players: [{name: '', score: 0}, {name: '', score: 0}],
@@ -295,7 +299,36 @@ document.getElementById('btn-gps').addEventListener('click', () => initializeGam
 document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession('map'));
 document.getElementById('btn-saved-location').addEventListener('click', () => initializeGameSession('saved'));
 
-function getUserLocation() {
+// MODIFICACIÓN PRINCIPAL AQUÍ PARA CAPACITOR
+async function getUserLocation() {
+    // Si estamos corriendo dentro de la app nativa (Capacitor)
+    if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.Geolocation) {
+        try {
+            const { Geolocation } = Capacitor.Plugins;
+            
+            // Verificamos permisos primero
+            let permStatus = await Geolocation.checkPermissions();
+            
+            // Si no están concedidos, pedimos permiso al usuario
+            if (permStatus.location !== 'granted') {
+                permStatus = await Geolocation.requestPermissions();
+            }
+            
+            // Si el usuario los deniega, lanzamos un error
+            if (permStatus.location !== 'granted') {
+                throw new Error("Permisos de ubicación denegados por el usuario.");
+            }
+
+            // Obtenemos la posición usando la API nativa de Capacitor
+            const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+            return [pos.coords.longitude, pos.coords.latitude];
+        } catch (e) {
+            console.error("Error al obtener ubicación nativa:", e);
+            throw e; 
+        }
+    }
+
+    // Fallback original para Web normal o si Capacitor falla
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) reject(new Error("Tu navegador no soporta geolocalización."));
         navigator.geolocation.getCurrentPosition(
@@ -317,8 +350,24 @@ function handleOrientation(event) {
     else if (event.alpha !== null) { heading = 360 - event.alpha; if (heading === 360) heading = 0; }
 
     if (heading !== null) {
-        state.currentHeading = heading;
-        UI.compassDial.style.transform = `rotate(${-heading}deg)`;
+        state.currentHeading = heading; // Se mantiene absoluto para los cálculos de impacto
+        
+        // Calcular la ruta más corta para evitar el giro completo visual
+        if (state.lastHeading === null) {
+            state.totalRotation = -heading;
+        } else {
+            let delta = heading - state.lastHeading;
+            // Ajustar el delta para que tome el camino más corto (-180 a +180)
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            
+            // Restamos el delta porque el dial visual gira a la inversa del rumbo
+            state.totalRotation -= delta;
+        }
+        
+        state.lastHeading = heading;
+
+        UI.compassDial.style.transform = `rotate(${state.totalRotation}deg)`;
         UI.debugInfo.innerText = `Rumbo: ${Math.round(heading)}°`;
     }
 }
