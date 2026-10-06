@@ -24,17 +24,20 @@
     <div id="start-screen" class="screen active">
         <img src="logo.png" alt="Dónde queda..." class="logo">
         <h1>¿Dónde queda... ?</h1>
+        <p id="start-level" class="start-level" style="display: none;"></p>
 
         <p>¿Cómo quieres jugar?</p>
 
         <div class="mode-buttons">
             <button id="btn-mode-single" class="btn-mode">
+                <span class="mode-icon">👤</span>
                 <span class="mode-text">
                     <span class="mode-title">Un jugador</span>
-                    <span class="mode-desc">Juega a tu ritmo, sin límite de rondas</span>
+                    <span class="mode-desc">Partidas de 10 rondas. ¡Bate tus récords!</span>
                 </span>
             </button>
             <button id="btn-mode-versus" class="btn-mode btn-mode-versus">
+                <span class="mode-icon">⚔️</span>
                 <span class="mode-text">
                     <span class="mode-title">Versus</span>
                     <span class="mode-desc">2 jugadores, 5 turnos cada uno</span>
@@ -42,7 +45,10 @@
             </button>
         </div>
 
-        <button id="btn-show-scores" class="btn-secondary btn-small">🏆 Puntuaciones</button>
+        <div class="secondary-actions">
+            <button id="btn-show-progress" class="btn-secondary btn-small">📈 Mi progreso</button>
+            <button id="btn-show-scores" class="btn-secondary btn-small">🏆 Ranking Versus</button>
+        </div>
     </div>
 
     <!-- PANTALLA DE SELECCIÓN DE REGIÓN -->
@@ -73,9 +79,9 @@
         <button id="btn-back-names" class="btn-secondary">Volver</button>
     </div>
 
-    <!-- PANTALLA DE PUNTUACIONES (LEADERBOARD) -->
+    <!-- PANTALLA DE PUNTUACIONES VERSUS (LEADERBOARD) -->
     <div id="leaderboard-screen" class="screen">
-        <h2 style="color: #E2A342; font-family: 'Ribeye Marrow', cursive;">Tabla de Puntuaciones</h2>
+        <h2 style="color: #E2A342; font-family: 'Ribeye Marrow', cursive;">Ranking Versus</h2>
 
         <ul id="leaderboard-list" class="leaderboard-list"></ul>
 
@@ -90,6 +96,36 @@
             <button id="btn-back-leaderboard" class="btn-secondary" style="width: 100%;">Volver</button>
             <button id="btn-clear-scores" style="background-color: #ef4444; width: 100%;">Borrar Datos</button>
         </div>
+    </div>
+
+    <!-- PANTALLA DE PROGRESO (UN JUGADOR) -->
+    <div id="progress-screen" class="screen scrollable">
+        <h2>Mi progreso</h2>
+
+        <div class="level-card">
+            <div class="level-header">
+                <span id="progress-level-name"></span>
+            </div>
+            <div class="level-bar">
+                <div id="progress-level-fill" class="level-fill"></div>
+            </div>
+            <p id="progress-level-text" class="level-text"></p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat"><span id="stat-games" class="stat-value">0</span><span class="stat-label">Partidas</span>
+            </div>
+            <div class="stat"><span id="stat-hits" class="stat-value">0</span><span class="stat-label">Aciertos</span>
+            </div>
+            <div class="stat"><span id="stat-accuracy" class="stat-value">0%</span><span
+                    class="stat-label">Precisión</span></div>
+        </div>
+
+        <h3 class="records-title">Récords por región</h3>
+        <ul id="records-list" class="records-list"></ul>
+
+        <button id="btn-back-progress" class="btn-secondary">Volver</button>
+        <button id="btn-reset-progress" class="btn-danger-small">Borrar progreso</button>
     </div>
 
     <!-- PANTALLA DE CRÉDITOS -->
@@ -127,6 +163,7 @@
         <h2 id="current-player-display"
             style="display: none; color: #E2A342; font-family: 'Ribeye Marrow', cursive; margin: 0 0 15px 0; font-size: 2.2rem;">
         </h2>
+        <p id="round-info" class="round-info"></p>
         <div class="game-header">
             <h3>¿Dónde queda</h3>
             <div class="target-container">
@@ -157,6 +194,35 @@
         </div>
         <button id="btn-restart">Siguiente Destino</button>
         <button id="btn-change-region" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE RESUMEN DE PARTIDA (UN JUGADOR) -->
+    <div id="summary-screen" class="screen scrollable">
+        <h1>¡Partida terminada!</h1>
+        <p id="summary-region" class="summary-region"></p>
+
+        <div id="summary-score" class="summary-score">0</div>
+        <p class="summary-label">puntos</p>
+        <p id="summary-hits" class="summary-hits"></p>
+        <p id="summary-record" class="summary-record"></p>
+
+        <div class="level-card">
+            <div class="level-header">
+                <span id="summary-level-name"></span>
+                <span id="summary-xp-gain" class="xp-gain"></span>
+            </div>
+            <div class="level-bar">
+                <div id="summary-level-fill" class="level-fill"></div>
+            </div>
+            <p id="summary-level-text" class="level-text"></p>
+        </div>
+        <p id="summary-level-up" class="level-up" style="display: none;"></p>
+
+        <div class="summary-actions">
+            <button id="btn-summary-again">Jugar otra vez</button>
+            <button id="btn-summary-region" class="btn-secondary">Cambiar región</button>
+            <button id="btn-summary-menu" class="btn-secondary">Menú principal</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>

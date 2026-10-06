@@ -1,35 +1,30 @@
 /* =======================================
-   ESTADO GLOBAL DEL JUEGO
+   CONFIGURACIÓN
    ======================================= */
-const state = {
-  continent: "Todos", // 'Todos' o el nombre de un continente
-  userLocation: null,
-  userCountryId: null, // País en el que está el jugador (se excluye como destino)
-  tempLocation: null,
-  currentHeading: 0,
-  targetData: null,
-  targetCenterLatLng: null,
-  countriesGeoJSON: null,
+const ROUNDS_PER_GAME = 10; // Rondas de una partida de un jugador
+const PROGRESS_KEY = "dondeQueda_progress";
 
-  // Variables de corrección de brújula
-  lastHeading: null,
-  totalRotation: 0,
-
-  // Variables Modo Versus
-  isVersus: false,
-  players: [
-    { name: "", score: 0 },
-    { name: "", score: 0 },
-  ],
-  currentPlayerIdx: 0,
-  turn: 1, // Max 10 (5 por jugador)
-
-  // Elementos de mapas
-  selectionMap: null,
-  selectionMarker: null,
-  resultMap: null,
-  resultMapLayers: null,
+const REGION_NAMES = {
+  Todos: "Todo el mundo",
+  América: "América",
+  Europa: "Europa",
+  Asia: "Asia",
+  África: "África",
+  Oceanía: "Oceanía",
 };
+
+// Títulos según el nivel (a partir del último se repite)
+const LEVEL_TITLES = [
+  "Turista",
+  "Mochilero",
+  "Viajero",
+  "Explorador",
+  "Navegante",
+  "Cartógrafo",
+  "Aventurero",
+  "Trotamundos",
+  "Leyenda",
+];
 
 const MARKER_STYLE = {
   radius: 5,
@@ -47,6 +42,42 @@ const COUNTRIES_STYLE = {
 };
 
 /* =======================================
+   ESTADO GLOBAL DEL JUEGO
+   ======================================= */
+const state = {
+  continent: "Todos", // 'Todos' o el nombre de un continente
+  userLocation: null,
+  userCountryId: null, // País en el que está el jugador (se excluye como destino)
+  tempLocation: null,
+  currentHeading: 0,
+  targetData: null,
+  targetCenterLatLng: null,
+  countriesGeoJSON: null,
+
+  // Variables de corrección de brújula
+  lastHeading: null,
+  totalRotation: 0,
+
+  // Partida de un jugador
+  single: { round: 1, score: 0, hits: 0 },
+
+  // Variables Modo Versus
+  isVersus: false,
+  players: [
+    { name: "", score: 0 },
+    { name: "", score: 0 },
+  ],
+  currentPlayerIdx: 0,
+  turn: 1, // Max 10 (5 por jugador)
+
+  // Elementos de mapas
+  selectionMap: null,
+  selectionMarker: null,
+  resultMap: null,
+  resultMapLayers: null,
+};
+
+/* =======================================
    REFERENCIAS AL DOM
    ======================================= */
 const screens = {
@@ -55,15 +86,19 @@ const screens = {
   credits: document.getElementById("credits-screen"),
   names: document.getElementById("names-screen"),
   leaderboard: document.getElementById("leaderboard-screen"),
+  progress: document.getElementById("progress-screen"),
   location: document.getElementById("location-screen"),
   game: document.getElementById("game-screen"),
   result: document.getElementById("result-screen"),
+  summary: document.getElementById("summary-screen"),
 };
 
 const UI = {
   // Pantalla de inicio (modo de juego)
+  startLevel: document.getElementById("start-level"),
   btnModeSingle: document.getElementById("btn-mode-single"),
   btnModeVersus: document.getElementById("btn-mode-versus"),
+  btnShowProgress: document.getElementById("btn-show-progress"),
   btnShowScores: document.getElementById("btn-show-scores"),
   btnCredits: document.getElementById("btn-credits-float"),
   btnCreditsBack: document.getElementById("btn-back-credits"),
@@ -80,7 +115,7 @@ const UI = {
   btnConfirmNames: document.getElementById("btn-confirm-names"),
   btnBackNames: document.getElementById("btn-back-names"),
 
-  // Pantalla Leaderboard
+  // Pantalla Leaderboard (Versus)
   leaderboardList: document.getElementById("leaderboard-list"),
   endgameActions: document.getElementById("endgame-actions"),
   standardActions: document.getElementById("standard-actions"),
@@ -88,6 +123,17 @@ const UI = {
   btnClearScores: document.getElementById("btn-clear-scores"),
   btnVersusRestart: document.getElementById("btn-versus-restart"),
   btnVersusExit: document.getElementById("btn-versus-exit"),
+
+  // Pantalla de progreso
+  progressLevelName: document.getElementById("progress-level-name"),
+  progressLevelFill: document.getElementById("progress-level-fill"),
+  progressLevelText: document.getElementById("progress-level-text"),
+  statGames: document.getElementById("stat-games"),
+  statHits: document.getElementById("stat-hits"),
+  statAccuracy: document.getElementById("stat-accuracy"),
+  recordsList: document.getElementById("records-list"),
+  btnBackProgress: document.getElementById("btn-back-progress"),
+  btnResetProgress: document.getElementById("btn-reset-progress"),
 
   // Pantalla Ubicación
   btnSavedLoc: document.getElementById("btn-saved-location"),
@@ -97,6 +143,7 @@ const UI = {
 
   // Pantalla Juego
   currentPlayerDisplay: document.getElementById("current-player-display"),
+  roundInfo: document.getElementById("round-info"),
   compassDial: document.getElementById("compass-dial"),
   debugInfo: document.getElementById("debug-info"),
   targetName: document.getElementById("target-name"),
@@ -107,7 +154,194 @@ const UI = {
   resultErrorDetails: document.getElementById("result-error-details"),
   btnRestart: document.getElementById("btn-restart"),
   btnChangeRegion: document.getElementById("btn-change-region"),
+
+  // Pantalla de resumen (un jugador)
+  summaryRegion: document.getElementById("summary-region"),
+  summaryScore: document.getElementById("summary-score"),
+  summaryHits: document.getElementById("summary-hits"),
+  summaryRecord: document.getElementById("summary-record"),
+  summaryLevelName: document.getElementById("summary-level-name"),
+  summaryXpGain: document.getElementById("summary-xp-gain"),
+  summaryLevelFill: document.getElementById("summary-level-fill"),
+  summaryLevelText: document.getElementById("summary-level-text"),
+  summaryLevelUp: document.getElementById("summary-level-up"),
+  btnSummaryAgain: document.getElementById("btn-summary-again"),
+  btnSummaryRegion: document.getElementById("btn-summary-region"),
+  btnSummaryMenu: document.getElementById("btn-summary-menu"),
 };
+
+/* =======================================
+   PROGRESO Y NIVELES
+   ======================================= */
+function emptyProgress() {
+  return { xp: 0, gamesPlayed: 0, totalHits: 0, bestByRegion: {} };
+}
+
+function loadProgress() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
+    if (saved) return { ...emptyProgress(), ...saved };
+  } catch {}
+  return emptyProgress();
+}
+
+function saveProgress(progress) {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+}
+
+// XP total necesaria para alcanzar un nivel: 0, 500, 1500, 3000, 5000...
+function xpForLevel(level) {
+  return 250 * level * (level - 1);
+}
+
+function getLevelInfo(xp) {
+  let level = 1;
+  while (xp >= xpForLevel(level + 1)) level++;
+  const base = xpForLevel(level);
+  const next = xpForLevel(level + 1);
+  return {
+    level,
+    title: LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)],
+    xpInLevel: xp - base,
+    xpNeeded: next - base,
+    progress: (xp - base) / (next - base),
+  };
+}
+
+function renderLevelCard(nameEl, fillEl, textEl, info) {
+  nameEl.textContent = `Nivel ${info.level} · ${info.title}`;
+  fillEl.style.width = `${Math.round(info.progress * 100)}%`;
+  textEl.textContent = `${info.xpInLevel} / ${info.xpNeeded} XP para el nivel ${info.level + 1}`;
+}
+
+function updateStartLevel() {
+  const progress = loadProgress();
+  if (progress.gamesPlayed === 0) {
+    UI.startLevel.style.display = "none";
+    return;
+  }
+  const info = getLevelInfo(progress.xp);
+  UI.startLevel.textContent = `Nivel ${info.level} · ${info.title}`;
+  UI.startLevel.style.display = "";
+}
+
+function updateRegionBests() {
+  const progress = loadProgress();
+  document.querySelectorAll(".btn-menu").forEach((btn) => {
+    let span = btn.querySelector(".region-best");
+    if (!span) {
+      span = document.createElement("span");
+      span.className = "region-best";
+      btn.appendChild(span);
+    }
+    const best = progress.bestByRegion[btn.dataset.region];
+    span.textContent = !state.isVersus && best ? `Récord: ${best.score}` : "";
+    span.style.display = span.textContent ? "" : "none";
+  });
+}
+
+function renderProgressScreen() {
+  const progress = loadProgress();
+  renderLevelCard(
+    UI.progressLevelName,
+    UI.progressLevelFill,
+    UI.progressLevelText,
+    getLevelInfo(progress.xp),
+  );
+
+  UI.statGames.textContent = progress.gamesPlayed;
+  UI.statHits.textContent = progress.totalHits;
+  const totalRounds = progress.gamesPlayed * ROUNDS_PER_GAME;
+  UI.statAccuracy.textContent = totalRounds
+    ? `${Math.round((progress.totalHits / totalRounds) * 100)}%`
+    : "0%";
+
+  UI.recordsList.innerHTML = "";
+  Object.entries(REGION_NAMES).forEach(([key, name]) => {
+    const best = progress.bestByRegion[key];
+    const li = document.createElement("li");
+    li.innerHTML = best
+      ? `<span>${name}</span><span><b>${best.score}</b> pts · ${best.hits}/${ROUNDS_PER_GAME}</span>`
+      : `<span>${name}</span><span class="record-empty">—</span>`;
+    UI.recordsList.appendChild(li);
+  });
+}
+
+function animateLevelBar(fillEl, fromProgress, toProgress) {
+  fillEl.style.transition = "none";
+  fillEl.style.width = `${Math.round(fromProgress * 100)}%`;
+  void fillEl.offsetWidth; // Fuerza el repintado para que la animación arranque
+  fillEl.style.transition = "";
+  setTimeout(() => {
+    fillEl.style.width = `${Math.round(toProgress * 100)}%`;
+  }, 150);
+}
+
+function finishSingleGame() {
+  const progress = loadProgress();
+  const before = getLevelInfo(progress.xp);
+  const { score, hits } = state.single;
+  const region = state.continent;
+  const prevBest = progress.bestByRegion[region];
+  const isRecord = !prevBest || score > prevBest.score;
+
+  progress.xp += score;
+  progress.gamesPlayed++;
+  progress.totalHits += hits;
+  if (isRecord) {
+    progress.bestByRegion[region] = {
+      score,
+      hits,
+      date: new Date().toISOString(),
+    };
+  }
+  saveProgress(progress);
+
+  const after = getLevelInfo(progress.xp);
+
+  // Resultado de la partida
+  UI.summaryRegion.textContent = REGION_NAMES[region];
+  UI.summaryScore.textContent = score;
+  UI.summaryHits.textContent = `${hits} de ${ROUNDS_PER_GAME} aciertos`;
+
+  if (!prevBest) {
+    UI.summaryRecord.textContent = "🏅 ¡Primer récord en esta región!";
+  } else if (isRecord) {
+    UI.summaryRecord.textContent = `🏆 ¡Nuevo récord! (antes: ${prevBest.score})`;
+  } else {
+    UI.summaryRecord.textContent = `Tu récord aquí: ${prevBest.score}`;
+  }
+  UI.summaryRecord.classList.toggle("is-record", isRecord);
+
+  // Nivel y experiencia
+  renderLevelCard(
+    UI.summaryLevelName,
+    UI.summaryLevelFill,
+    UI.summaryLevelText,
+    after,
+  );
+  UI.summaryXpGain.textContent = `+${score} XP`;
+
+  const leveledUp = after.level > before.level;
+  animateLevelBar(
+    UI.summaryLevelFill,
+    leveledUp ? 0 : before.progress,
+    after.progress,
+  );
+
+  if (leveledUp) {
+    UI.summaryLevelUp.textContent = `⬆️ ¡Subes a nivel ${after.level}: ${after.title}!`;
+    UI.summaryLevelUp.style.display = "";
+  } else {
+    UI.summaryLevelUp.style.display = "none";
+  }
+
+  showScreen("summary");
+}
+
+function resetSingleGame() {
+  state.single = { round: 1, score: 0, hits: 0 };
+}
 
 /* =======================================
    NAVEGACIÓN Y PANTALLAS
@@ -123,6 +357,7 @@ function showScreen(screenName) {
 
 function returnToMenu() {
   state.isVersus = false;
+  updateStartLevel();
   showScreen("start");
 }
 
@@ -132,7 +367,8 @@ function goToRegionSelect() {
   UI.btnBackRegion.style.display = "";
   UI.regionSubtitle.textContent = state.isVersus
     ? `Versus: ${state.players[0].name} vs ${state.players[1].name}`
-    : "Modo un jugador";
+    : `Un jugador · ${ROUNDS_PER_GAME} rondas`;
+  updateRegionBests();
   showScreen("region");
 }
 
@@ -148,6 +384,11 @@ UI.btnModeVersus.addEventListener("click", () => {
   showScreen("names");
 });
 
+UI.btnShowProgress.addEventListener("click", () => {
+  renderProgressScreen();
+  showScreen("progress");
+});
+
 UI.btnShowScores.addEventListener("click", () => {
   renderLeaderboard(false);
   showScreen("leaderboard");
@@ -155,6 +396,20 @@ UI.btnShowScores.addEventListener("click", () => {
 
 UI.btnCredits.addEventListener("click", () => showScreen("credits"));
 UI.btnCreditsBack.addEventListener("click", returnToMenu);
+
+// --- Pantalla de progreso ---
+UI.btnBackProgress.addEventListener("click", returnToMenu);
+
+UI.btnResetProgress.addEventListener("click", () => {
+  if (
+    confirm(
+      "¿Seguro que quieres borrar tu progreso? Perderás tu nivel y tus récords.",
+    )
+  ) {
+    localStorage.removeItem(PROGRESS_KEY);
+    renderProgressScreen();
+  }
+});
 
 // --- Pantalla de nombres (Versus) ---
 UI.btnConfirmNames.addEventListener("click", () => {
@@ -194,11 +449,13 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
 
     state.continent = region;
 
-    // En Versus, cada nueva partida empieza de cero
+    // Cada nueva partida empieza de cero
     if (state.isVersus) {
       state.players.forEach((p) => (p.score = 0));
       state.currentPlayerIdx = 0;
       state.turn = 1;
+    } else {
+      resetSingleGame();
     }
 
     await loadAssetsAndPrepareLoc();
@@ -245,9 +502,23 @@ UI.btnChangeRegion.addEventListener("click", () => {
       returnToMenu();
     }
   } else {
-    goToRegionSelect();
+    if (
+      confirm(
+        "¿Seguro que quieres abandonar la partida? No se guardará la puntuación.",
+      )
+    ) {
+      goToRegionSelect();
+    }
   }
 });
+
+// --- Pantalla de resumen (un jugador) ---
+UI.btnSummaryAgain.addEventListener("click", () => {
+  resetSingleGame();
+  startNewRound(); // Misma región y misma ubicación
+});
+UI.btnSummaryRegion.addEventListener("click", goToRegionSelect);
+UI.btnSummaryMenu.addEventListener("click", returnToMenu);
 
 /* =======================================
    PREPARACIÓN Y SELECCIÓN DE UBICACIÓN
@@ -477,10 +748,13 @@ function startNewRound() {
   UI.turnPointsDisplay.style.display = "none";
 
   if (state.isVersus) {
-    UI.currentPlayerDisplay.textContent = `Turno de ${state.players[state.currentPlayerIdx].name}`;
+    const player = state.players[state.currentPlayerIdx];
+    UI.currentPlayerDisplay.textContent = `Turno de ${player.name}`;
     UI.currentPlayerDisplay.style.display = "block";
+    UI.roundInfo.textContent = `Turno ${Math.ceil(state.turn / 2)} de 5 · ${player.score} pts`;
   } else {
     UI.currentPlayerDisplay.style.display = "none";
+    UI.roundInfo.textContent = `Ronda ${state.single.round} de ${ROUNDS_PER_GAME} · ${state.single.score} pts`;
   }
 
   const previousId = state.targetData ? state.targetData.id : null;
@@ -586,15 +860,22 @@ document.getElementById("btn-confirm").addEventListener("click", () => {
     UI.resultErrorDetails.style.display = "block";
   }
 
+  UI.turnPointsDisplay.textContent = `+${turnPoints} puntos`;
+  UI.turnPointsDisplay.style.display = "block";
+
   if (state.isVersus) {
     state.players[state.currentPlayerIdx].score += turnPoints;
-    UI.turnPointsDisplay.textContent = `+${turnPoints} Puntos`;
-    UI.turnPointsDisplay.style.display = "block";
 
     if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
     else UI.btnRestart.textContent = "Siguiente Turno";
   } else {
-    UI.btnRestart.textContent = "Siguiente Destino";
+    state.single.score += turnPoints;
+    if (isHit) state.single.hits++;
+
+    UI.btnRestart.textContent =
+      state.single.round >= ROUNDS_PER_GAME
+        ? "Ver resultado"
+        : "Siguiente ronda";
   }
 
   setTimeout(() => {
@@ -614,12 +895,17 @@ UI.btnRestart.addEventListener("click", () => {
       startNewRound();
     }
   } else {
-    startNewRound();
+    if (state.single.round >= ROUNDS_PER_GAME) {
+      finishSingleGame();
+    } else {
+      state.single.round++;
+      startNewRound();
+    }
   }
 });
 
 /* =======================================
-   LEADERBOARD Y PUNTUACIONES
+   LEADERBOARD Y PUNTUACIONES (VERSUS)
    ======================================= */
 function saveScores() {
   let scores = JSON.parse(localStorage.getItem("dondeQueda_scores")) || {};
@@ -801,3 +1087,8 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
     MARKER_STYLE,
   ).addTo(state.resultMapLayers);
 }
+
+/* =======================================
+   ARRANQUE
+   ======================================= */
+updateStartLevel();

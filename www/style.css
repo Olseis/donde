@@ -35,6 +35,14 @@ html {
     display: flex;
 }
 
+/* Pantallas con mucho contenido: permiten desplazarse */
+.screen.scrollable {
+    justify-content: flex-start;
+    overflow-y: auto;
+    padding-top: 30px;
+    padding-bottom: 30px;
+}
+
 /* Tipografía y textos */
 h1 {
     font-size: 2.2rem;
@@ -130,7 +138,21 @@ button:disabled {
     font-size: 1rem;
 }
 
+.btn-danger-small {
+    background-color: #ef4444;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+}
+
 /* Pantalla de inicio: modo de juego */
+.start-level {
+    color: #E2A342;
+    font-family: Arial, sans-serif;
+    font-size: 0.95rem;
+    font-weight: bold;
+    margin: -5px 0 10px 0;
+}
+
 .mode-buttons {
     display: flex;
     flex-direction: column;
@@ -179,6 +201,18 @@ button:disabled {
     opacity: 0.85;
 }
 
+.secondary-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.secondary-actions button {
+    margin-top: 0;
+}
+
 /* Pantalla de región */
 .region-subtitle {
     color: #E2A342;
@@ -200,9 +234,10 @@ button:disabled {
     padding: 15px 10px;
     font-size: 1.1rem;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 2px;
     margin: 0;
 }
 
@@ -213,6 +248,13 @@ button:disabled {
 
 .btn-wide {
     grid-column: span 2;
+}
+
+.region-best {
+    font-family: Arial, sans-serif;
+    font-size: 0.75rem;
+    font-weight: normal;
+    opacity: 0.85;
 }
 
 /* Pantalla de Nombres */
@@ -266,6 +308,167 @@ button:disabled {
     border-radius: 6px;
 }
 
+/* Niveles y experiencia */
+.level-card {
+    width: 100%;
+    max-width: 350px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+}
+
+.level-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    color: #E2A342;
+}
+
+.xp-gain {
+    color: #4ade80;
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+}
+
+.level-bar {
+    height: 12px;
+    background: #1e293b;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.level-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #f59e0b, #facc15);
+    transition: width 0.9s ease-out;
+}
+
+.level-text {
+    font-family: Arial, sans-serif;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin: 8px 0 0 0;
+}
+
+.level-up {
+    color: #4ade80;
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+    margin: 0 0 10px 0;
+}
+
+/* Pantalla de resumen de partida */
+.summary-region {
+    color: #60a5fa;
+    margin: 0 0 10px 0;
+}
+
+.summary-score {
+    font-family: 'Ribeye Marrow', cursive;
+    font-size: 4rem;
+    color: #E2A342;
+    line-height: 1;
+}
+
+.summary-label {
+    margin: 0 0 10px 0;
+    opacity: 0.8;
+}
+
+.summary-hits {
+    font-family: Arial, sans-serif;
+    margin: 0 0 8px 0;
+}
+
+.summary-record {
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+    color: #94a3b8;
+    margin: 0 0 15px 0;
+}
+
+.summary-record.is-record {
+    color: #facc15;
+}
+
+.summary-actions {
+    width: 100%;
+    max-width: 350px;
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-actions button {
+    width: 100%;
+}
+
+/* Pantalla de progreso */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+    max-width: 350px;
+    margin: 5px 0 15px 0;
+}
+
+.stat {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+    padding: 10px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.stat-value {
+    font-size: 1.4rem;
+    color: #E2A342;
+}
+
+.stat-label {
+    font-family: Arial, sans-serif;
+    font-size: 0.8rem;
+    color: #94a3b8;
+}
+
+.records-title {
+    margin: 5px 0 8px 0;
+}
+
+.records-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    max-width: 350px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+}
+
+.records-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #334155;
+    font-family: Arial, sans-serif;
+}
+
+.records-list li:last-child {
+    border-bottom: none;
+}
+
+.record-empty {
+    color: #64748b;
+}
+
 /* Sección de Créditos (Flotante y Pantalla) */
 #btn-credits-float {
     position: fixed;
@@ -309,6 +512,13 @@ button:disabled {
 }
 
 /* Brújula */
+.round-info {
+    font-family: Arial, sans-serif;
+    color: #94a3b8;
+    font-size: 1rem;
+    margin: 0 0 10px 0;
+}
+
 .compass-container {
     position: relative;
     width: 220px;
