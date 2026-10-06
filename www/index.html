@@ -20,12 +20,37 @@
     <!-- BOTÓN DE CRÉDITOS FLOTANTE -->
     <button id="btn-credits-float" aria-label="Créditos">ℹ</button>
 
-    <!-- PANTALLA DE INICIO -->
+    <!-- PANTALLA DE INICIO: MODO DE JUEGO -->
     <div id="start-screen" class="screen active">
         <img src="logo.png" alt="Dónde queda..." class="logo">
         <h1>¿Dónde queda... ?</h1>
 
-        <p>Selecciona una región para jugar:</p>
+        <p>¿Cómo quieres jugar?</p>
+
+        <div class="mode-buttons">
+            <button id="btn-mode-single" class="btn-mode">
+                <span class="mode-icon">👤</span>
+                <span class="mode-text">
+                    <span class="mode-title">Un jugador</span>
+                    <span class="mode-desc">Juega a tu ritmo, sin límite de rondas</span>
+                </span>
+            </button>
+            <button id="btn-mode-versus" class="btn-mode btn-mode-versus">
+                <span class="mode-icon">⚔️</span>
+                <span class="mode-text">
+                    <span class="mode-title">Versus</span>
+                    <span class="mode-desc">2 jugadores, 5 turnos cada uno</span>
+                </span>
+            </button>
+        </div>
+
+        <button id="btn-show-scores" class="btn-secondary btn-small">🏆 Puntuaciones</button>
+    </div>
+
+    <!-- PANTALLA DE SELECCIÓN DE REGIÓN -->
+    <div id="region-screen" class="screen">
+        <h2>Elige una región</h2>
+        <p id="region-subtitle" class="region-subtitle"></p>
 
         <div class="menu-grid" id="menu-container">
             <button class="btn-menu btn-all" data-region="Todos">Todo el Mundo</button>
@@ -39,17 +64,7 @@
 
         <p id="start-loading-text" class="loading-text">Cargando mapa mundial...</p>
 
-        <!-- CONTROLES MODO VERSUS -->
-        <div class="versus-container" id="versus-controls">
-            <div class="versus-toggle-group">
-                <span>Versus</span>
-                <label class="switch">
-                    <input type="checkbox" id="toggle-versus">
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <button id="btn-show-scores" class="btn-secondary btn-small" style="display: none;">Puntuaciones</button>
-        </div>
+        <button id="btn-back-region" class="btn-secondary">Volver</button>
     </div>
 
     <!-- PANTALLA DE NOMBRES VERSUS -->
@@ -57,7 +72,7 @@
         <h2 style="color: #E2A342;">Nombres de los Jugadores</h2>
         <input type="text" id="input-p1" placeholder="Jugador 1" class="name-input" autocomplete="off">
         <input type="text" id="input-p2" placeholder="Jugador 2" class="name-input" autocomplete="off">
-        <button id="btn-confirm-names">Confirmar Nombres</button>
+        <button id="btn-confirm-names">Continuar</button>
         <button id="btn-back-names" class="btn-secondary">Volver</button>
     </div>
 
@@ -149,25 +164,6 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-
-    <!--Pantalla de permisos-->
-    <div id="permissions-screen" class="screen">
-        <div class="perm-box">
-            <h2>Antes de empezar</h2>
-            <p>Para jugar necesitamos acceso a:</p>
-            <ul class="perm-list">
-                <li>🧭 <b>Brújula</b>: para saber hacia dónde apuntas.</li>
-                <li>📍 <b>Ubicación</b>: para saber desde dónde juegas. Es opcional, también puedes marcarla en el
-                    mapa.
-                </li>
-            </ul>
-            <p class="perm-note">Solo se usan para jugar. Puedes cambiarlo cuando quieras en los Ajustes del móvil.
-            </p>
-            <button id="btn-perm-allow" class="perm-btn perm-btn-primary">Permitir</button>
-            <button id="btn-perm-skip" class="perm-btn">Ahora no</button>
-            <p id="perm-status" class="perm-status"></p>
-        </div>
-    </div>
 
     <!-- Archivos Modulares -->
     <script src="data.js"></script>
