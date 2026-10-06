@@ -61,33 +61,3 @@ const dictionary = {
     "AUS": { name: "Australia", continent: "Oceanía" }, "NZL": { name: "Nueva Zelanda", continent: "Oceanía" }, 
     "PNG": { name: "Papúa Nueva Guinea", continent: "Oceanía" }, "FJI": { name: "Fiyi", continent: "Oceanía" }
 };
-
-const citiesData = [
-    { name: "Madrid", lat: 40.4168, lng: -3.7038 }, { name: "Barcelona", lat: 41.3874, lng: 2.1686 },
-    { name: "Valencia", lat: 39.4699, lng: -0.3763 }, { name: "Sevilla", lat: 37.3891, lng: -5.9845 },
-    { name: "Zaragoza", lat: 41.6488, lng: -0.8891 }, { name: "Málaga", lat: 36.7213, lng: -4.4214 },
-    { name: "Murcia", lat: 37.9922, lng: -1.1307 }, { name: "Palma de Mallorca", lat: 39.5694, lng: 2.6502 },
-    { name: "Las Palmas", lat: 28.1235, lng: -15.4363 }, { name: "Bilbao", lat: 43.2630, lng: -2.9350 },
-    { name: "Alicante", lat: 38.3452, lng: -0.4810 }, { name: "Córdoba", lat: 37.8882, lng: -4.7794 },
-    { name: "Valladolid", lat: 41.6523, lng: -4.7245 }, { name: "Vigo", lat: 42.2406, lng: -8.7207 },
-    { name: "Gijón", lat: 43.5322, lng: -5.6611 }, { name: "Granada", lat: 37.1773, lng: -3.5986 },
-    { name: "Vitoria", lat: 42.8467, lng: -2.6716 }, { name: "Oviedo", lat: 43.3614, lng: -5.8593 },
-    { name: "S.C. de Tenerife", lat: 28.4636, lng: -16.2518 }, { name: "Pamplona", lat: 42.8125, lng: -1.6458 },
-    { name: "Almería", lat: 36.8340, lng: -2.4637 }, { name: "San Sebastián", lat: 43.3183, lng: -1.9812 },
-    { name: "Santander", lat: 43.4623, lng: -3.8099 }, { name: "Burgos", lat: 42.3439, lng: -3.6969 },
-    { name: "Albacete", lat: 38.9943, lng: -1.8585 }, { name: "Salamanca", lat: 40.9701, lng: -5.6635 },
-    { name: "Logroño", lat: 42.4627, lng: -2.4450 }, { name: "Badajoz", lat: 38.8794, lng: -6.9706 },
-    { name: "Huelva", lat: 37.2614, lng: -6.9447 }, { name: "León", lat: 42.5987, lng: -5.5671 },
-    { name: "Cádiz", lat: 36.5271, lng: -6.2886 }, { name: "Cáceres", lat: 39.4753, lng: -6.3724 },
-    { name: "Girona", lat: 41.9794, lng: 2.8214 }, { name: "Lleida", lat: 41.6167, lng: 0.6222 },
-    { name: "Tarragona", lat: 41.1189, lng: 1.2445 }, { name: "Toledo", lat: 39.8628, lng: -4.0273 },
-    { name: "Segovia", lat: 40.9429, lng: -4.1088 }, { name: "Cuenca", lat: 40.0704, lng: -2.1374 },
-    { name: "Soria", lat: 41.7640, lng: -2.4688 }, { name: "Teruel", lat: 40.3456, lng: -1.1065 },
-    { name: "Huesca", lat: 42.1362, lng: -0.4087 }, { name: "Jaén", lat: 37.7796, lng: -3.7924 },
-    { name: "Ourense", lat: 42.3367, lng: -7.8641 }, { name: "Lugo", lat: 43.0121, lng: -7.5558 },
-    { name: "Pontevedra", lat: 42.4310, lng: -8.6444 }, { name: "Zamora", lat: 41.5033, lng: -5.7463 },
-    { name: "Ávila", lat: 40.6543, lng: -4.6962 }, { name: "Palencia", lat: 42.0095, lng: -4.5241 },
-    { name: "Guadalajara", lat: 40.6333, lng: -3.1667 }, { name: "Ciudad Real", lat: 38.9863, lng: -3.9291 },
-    { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 },
-    { name: "Táliga", lat: 38.5267, lng: -7.0147 }
-];

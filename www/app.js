@@ -2,9 +2,9 @@
    ESTADO GLOBAL DEL JUEGO
    ======================================= */
 const state = {
-  mode: "world", // 'world' o 'spain'
-  continent: "Todos",
+  continent: "Todos", // 'Todos' o el nombre de un continente
   userLocation: null,
+  userCountryId: null, // País en el que está el jugador (se excluye como destino)
   tempLocation: null,
   currentHeading: 0,
   targetData: null,
@@ -29,6 +29,21 @@ const state = {
   selectionMarker: null,
   resultMap: null,
   resultMapLayers: null,
+};
+
+const MARKER_STYLE = {
+  radius: 5,
+  fillColor: "#3b82f6",
+  color: "#ffffff",
+  weight: 2,
+  fillOpacity: 1,
+};
+
+const COUNTRIES_STYLE = {
+  fillColor: "#1e293b",
+  weight: 1,
+  color: "#334155",
+  fillOpacity: 0.5,
 };
 
 /* =======================================
@@ -145,9 +160,11 @@ UI.btnCreditsBack.addEventListener("click", returnToMenu);
 UI.btnConfirmNames.addEventListener("click", () => {
   const p1 = UI.inputP1.value.trim() || "Jugador 1";
   const p2 = UI.inputP2.value.trim() || "Jugador 2";
-  while (p1 === UI.inputP2.value.trim()) {
+
+  if (p1.toLowerCase() === p2.toLowerCase()) {
     alert("Los nombres no pueden ser iguales.");
-    p2 = UI.inputP2.value.trim();
+    UI.inputP2.focus();
+    return;
   }
 
   state.isVersus = true;
@@ -175,8 +192,7 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
     const region = e.currentTarget.dataset.region;
     if (!region) return;
 
-    state.mode = region === "España" ? "spain" : "world";
-    state.continent = region === "España" ? "Todos" : region;
+    state.continent = region;
 
     // En Versus, cada nueva partida empieza de cero
     if (state.isVersus) {
@@ -190,7 +206,7 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
 });
 
 async function loadAssetsAndPrepareLoc() {
-  if (state.mode === "world" && !state.countriesGeoJSON) {
+  if (!state.countriesGeoJSON) {
     UI.menuContainer.style.display = "none";
     UI.btnBackRegion.style.display = "none";
     UI.startLoading.style.display = "block";
@@ -249,67 +265,22 @@ function prepareLocationScreen() {
     UI.btnConfirmLoc.disabled = false;
   }
 
-  if (!state.selectionMap) {
-    const startCenter = savedLoc
-      ? [savedLoc[1], savedLoc[0]]
-      : state.mode === "spain"
-        ? [40.0, -3.0]
-        : [20, 0];
-    const startZoom = savedLoc
-      ? state.mode === "spain"
-        ? 5
-        : 4
-      : state.mode === "spain"
-        ? 5
-        : 1;
+  const center = savedLoc ? [savedLoc[1], savedLoc[0]] : [20, 0];
+  const zoom = savedLoc ? 4 : 1;
 
+  if (!state.selectionMap) {
     state.selectionMap = L.map("select-map-container", {
       zoomControl: false,
       attributionControl: false,
-    }).setView(startCenter, startZoom);
-
-    if (state.mode === "spain") {
-      L.tileLayer("https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}").addTo(
-        state.selectionMap,
-      );
-    } else {
-      L.geoJSON(state.countriesGeoJSON, {
-        style: {
-          fillColor: "#1e293b",
-          weight: 1,
-          color: "#334155",
-          fillOpacity: 0.5,
-        },
-      }).addTo(state.selectionMap);
-    }
-
-    if (savedLoc) {
-      state.selectionMarker =
-        state.mode === "spain"
-          ? L.marker([savedLoc[1], savedLoc[0]]).addTo(state.selectionMap)
-          : L.circleMarker([savedLoc[1], savedLoc[0]], {
-              radius: 5,
-              fillColor: "#3b82f6",
-              color: "#ffffff",
-              weight: 2,
-              fillOpacity: 1,
-            }).addTo(state.selectionMap);
-    }
+    });
 
     state.selectionMap.on("click", (ev) => {
       state.tempLocation = [ev.latlng.lng, ev.latlng.lat];
 
       if (!state.selectionMarker) {
-        state.selectionMarker =
-          state.mode === "spain"
-            ? L.marker(ev.latlng).addTo(state.selectionMap)
-            : L.circleMarker(ev.latlng, {
-                radius: 5,
-                fillColor: "#3b82f6",
-                color: "#ffffff",
-                weight: 2,
-                fillOpacity: 1,
-              }).addTo(state.selectionMap);
+        state.selectionMarker = L.circleMarker(ev.latlng, MARKER_STYLE).addTo(
+          state.selectionMap,
+        );
       } else {
         state.selectionMarker.setLatLng(ev.latlng);
       }
@@ -319,49 +290,19 @@ function prepareLocationScreen() {
     state.selectionMap.eachLayer((layer) =>
       state.selectionMap.removeLayer(layer),
     );
-    const center = savedLoc
-      ? [savedLoc[1], savedLoc[0]]
-      : state.mode === "spain"
-        ? [40.0, -3.0]
-        : [20, 0];
-    const zoom = savedLoc
-      ? state.mode === "spain"
-        ? 5
-        : 4
-      : state.mode === "spain"
-        ? 5
-        : 1;
-    state.selectionMap.setView(center, zoom);
+    state.selectionMarker = null;
+  }
 
-    if (state.mode === "spain") {
-      L.tileLayer("https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}").addTo(
-        state.selectionMap,
-      );
-    } else {
-      L.geoJSON(state.countriesGeoJSON, {
-        style: {
-          fillColor: "#1e293b",
-          weight: 1,
-          color: "#334155",
-          fillOpacity: 0.5,
-        },
-      }).addTo(state.selectionMap);
-    }
+  state.selectionMap.setView(center, zoom);
+  L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(
+    state.selectionMap,
+  );
 
-    if (state.tempLocation) {
-      state.selectionMarker =
-        state.mode === "spain"
-          ? L.marker([state.tempLocation[1], state.tempLocation[0]]).addTo(
-              state.selectionMap,
-            )
-          : L.circleMarker([state.tempLocation[1], state.tempLocation[0]], {
-              radius: 5,
-              fillColor: "#3b82f6",
-              color: "#ffffff",
-              weight: 2,
-              fillOpacity: 1,
-            }).addTo(state.selectionMap);
-    }
+  if (state.tempLocation) {
+    state.selectionMarker = L.circleMarker(
+      [state.tempLocation[1], state.tempLocation[0]],
+      MARKER_STYLE,
+    ).addTo(state.selectionMap);
   }
 
   setTimeout(() => state.selectionMap.invalidateSize(), 200);
@@ -406,6 +347,8 @@ async function initializeGameSession(source) {
       );
     }
 
+    state.userCountryId = findCountryAt(state.userLocation);
+
     startCompass();
     startNewRound();
     UI.locLoading.style.display = "none";
@@ -416,6 +359,20 @@ async function initializeGameSession(source) {
     );
     UI.locLoading.style.display = "none";
   }
+}
+
+// Devuelve el código del país en el que está un punto (o null si es mar)
+function findCountryAt(location) {
+  if (!location || !state.countriesGeoJSON) return null;
+  const pt = turf.point(location);
+  const country = state.countriesGeoJSON.features.find((f) => {
+    try {
+      return turf.booleanPointInPolygon(pt, f);
+    } catch {
+      return false;
+    }
+  });
+  return country ? country.id : null;
 }
 
 document
@@ -526,84 +483,56 @@ function startNewRound() {
     UI.currentPlayerDisplay.style.display = "none";
   }
 
-  if (state.mode === "spain") {
-    state.targetData =
-      citiesData[Math.floor(Math.random() * citiesData.length)];
-    UI.targetName.textContent = state.targetData.name;
-    state.targetCenterLatLng = L.latLng(
-      state.targetData.lat,
-      state.targetData.lng,
-    );
-  } else {
-    const validCountries = state.countriesGeoJSON.features.filter((f) => {
-      const inDict = dictionary[f.id];
-      if (!inDict) return false;
-      if (state.continent === "Todos" && f.id === "ESP") return false;
-      if (state.continent === "Todos") return true;
-      return inDict.continent === state.continent;
-    });
-    state.targetData =
-      validCountries[Math.floor(Math.random() * validCountries.length)];
-    UI.targetName.textContent = dictionary[state.targetData.id].name;
+  const previousId = state.targetData ? state.targetData.id : null;
 
-    const center = turf.centroid(state.targetData).geometry.coordinates;
-    state.targetCenterLatLng = L.latLng(center[1], center[0]);
+  let validCountries = state.countriesGeoJSON.features.filter((f) => {
+    const inDict = dictionary[f.id];
+    if (!inDict) return false;
+    if (f.id === state.userCountryId) return false; // No preguntar por tu propio país
+    if (state.continent === "Todos") return true;
+    return inDict.continent === state.continent;
+  });
+
+  // Evitar que salga el mismo país dos veces seguidas
+  if (validCountries.length > 1) {
+    validCountries = validCountries.filter((f) => f.id !== previousId);
   }
+
+  state.targetData =
+    validCountries[Math.floor(Math.random() * validCountries.length)];
+  UI.targetName.textContent = dictionary[state.targetData.id].name.trim();
+
+  const center = turf.centroid(state.targetData).geometry.coordinates;
+  state.targetCenterLatLng = L.latLng(center[1], center[0]);
 }
 
 document.getElementById("btn-confirm").addEventListener("click", () => {
   showScreen("result");
 
   let isHit = false;
-  let exactCollisionBeam = null;
   let errorLine = null;
 
-  if (state.mode === "spain") {
-    const targetPolygon = turf.circle(
-      [state.targetData.lng, state.targetData.lat],
-      20,
-      { units: "kilometers" },
-    );
-    state.targetData.polygonGeometry = targetPolygon;
+  const distanceToTarget = turf.distance(
+    state.userLocation,
+    [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat],
+    { units: "kilometers" },
+  );
+  const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
 
-    const distanceToTarget = turf.distance(
-      state.userLocation,
-      [state.targetData.lng, state.targetData.lat],
-      { units: "kilometers" },
-    );
-    const rayLengthKm = Math.min(distanceToTarget + 500, 4000);
+  const linePoints = buildBeamString(rayLengthKm, 100, true);
+  const lines = breakLinesOnMeridian(linePoints);
+  const exactCollisionBeam = turf.featureCollection(lines);
 
-    const linePoints = buildBeamString(rayLengthKm, 20);
-    exactCollisionBeam = turf.lineString(linePoints);
+  const flattenedCountry = turf.flatten(state.targetData);
+  turf.featureEach(flattenedCountry, function (countryPart) {
+    turf.featureEach(exactCollisionBeam, function (linePart) {
+      const intersections = turf.lineIntersect(linePart, countryPart);
+      if (intersections.features.length > 0) isHit = true;
 
-    const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
-    if (intersections.features.length > 0) isHit = true;
-
-    const startPoint = turf.point(linePoints[0]);
-    if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
-  } else {
-    const distanceToTarget = turf.distance(
-      state.userLocation,
-      [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat],
-      { units: "kilometers" },
-    );
-    const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
-
-    const linePoints = buildBeamString(rayLengthKm, 100, true);
-    const lines = breakLinesOnMeridian(linePoints);
-    exactCollisionBeam = turf.featureCollection(lines);
-
-    const flattenedCountry = turf.flatten(state.targetData);
-    turf.featureEach(flattenedCountry, function (countryPart) {
-      turf.featureEach(exactCollisionBeam, function (linePart) {
-        const intersections = turf.lineIntersect(linePart, countryPart);
-        if (intersections.features.length > 0) isHit = true;
-
-        const startPoint = turf.point(linePart.geometry.coordinates[0]);
-        if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
-      });
+      const startPoint = turf.point(linePart.geometry.coordinates[0]);
+      if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
     });
-  }
+  });
 
   // Calcular error de rumbo para sistema de puntuación
   const idealBearing = turf.bearing(state.userLocation, [
@@ -634,11 +563,7 @@ document.getElementById("btn-confirm").addEventListener("click", () => {
     let minDistance = Infinity;
     let closestCountryPt = null;
 
-    let targetGeom =
-      state.mode === "spain"
-        ? state.targetData.polygonGeometry
-        : state.targetData;
-    const vertices = turf.explode(targetGeom);
+    const vertices = turf.explode(state.targetData);
     const userPt = turf.point(state.userLocation);
 
     turf.featureEach(vertices, function (pointFeature) {
@@ -846,54 +771,20 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
     if (layer !== state.resultMapLayers) state.resultMap.removeLayer(layer);
   });
 
-  if (state.mode === "spain") {
-    L.tileLayer("https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}").addTo(
-      state.resultMap,
-    );
+  L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(
+    state.resultMap,
+  );
 
-    L.geoJSON(state.targetData.polygonGeometry, {
-      style: {
-        fillColor: isHit ? "#22c55e" : "#ef4444",
-        weight: 2,
-        color: "#ffffff",
-        fillOpacity: 0.8,
-      },
-    }).addTo(state.resultMapLayers);
+  L.geoJSON(state.targetData, {
+    style: {
+      fillColor: isHit ? "#22c55e" : "#ef4444",
+      weight: 2,
+      color: "#ffffff",
+      fillOpacity: 0.8,
+    },
+  }).addTo(state.resultMapLayers);
 
-    L.circleMarker([state.targetData.lat, state.targetData.lng], {
-      radius: 4,
-      fillColor: "#000000",
-      color: "#000000",
-      weight: 1,
-      fillOpacity: 1,
-    }).addTo(state.resultMapLayers);
-
-    const bounds = L.latLngBounds([
-      [state.userLocation[1], state.userLocation[0]],
-      [state.targetData.lat, state.targetData.lng],
-    ]);
-    state.resultMap.fitBounds(bounds, { padding: [30, 30] });
-  } else {
-    L.geoJSON(state.countriesGeoJSON, {
-      style: {
-        fillColor: "#1e293b",
-        weight: 1,
-        color: "#334155",
-        fillOpacity: 0.5,
-      },
-    }).addTo(state.resultMap);
-
-    L.geoJSON(state.targetData, {
-      style: {
-        fillColor: isHit ? "#22c55e" : "#ef4444",
-        weight: 2,
-        color: "#ffffff",
-        fillOpacity: 0.8,
-      },
-    }).addTo(state.resultMapLayers);
-
-    state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
-  }
+  state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
 
   L.geoJSON(beamGeometry, {
     style: { color: isHit ? "#4ade80" : "#f87171", weight: 5, opacity: 0.8 },
@@ -905,11 +796,8 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
     }).addTo(state.resultMapLayers);
   }
 
-  L.circleMarker([state.userLocation[1], state.userLocation[0]], {
-    radius: state.mode === "spain" ? 6 : 5,
-    fillColor: "#3b82f6",
-    color: "#ffffff",
-    weight: 2,
-    fillOpacity: 1,
-  }).addTo(state.resultMapLayers);
+  L.circleMarker(
+    [state.userLocation[1], state.userLocation[0]],
+    MARKER_STYLE,
+  ).addTo(state.resultMapLayers);
 }

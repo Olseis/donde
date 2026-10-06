@@ -211,9 +211,8 @@ button:disabled {
     background-color: #2563eb;
 }
 
-.btn-spain {
-    grid-column: span 1;
-    background-color: #dc2626;
+.btn-wide {
+    grid-column: span 2;
 }
 
 /* Pantalla de Nombres */
