@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.dondequeda.dondequeda.app-mergeDebugResources-26:/values-v33/values-v33.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\ventu\\.gradle\\caches\\9.6.0\\transforms\\b8025db1d5acfa7308452395a3bd8615\\transformed\\core-splashscreen-1.2.0\\res\\values-v33\\values-v33.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "5",
+                        "endColumns": "12",
+                        "endOffsets": "284"
+                    }
+                }
+            ]
+        }
+    ]
+}
