@@ -23,11 +23,11 @@ html {
     display: none;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: center; /* Esto mantendrá el menú centrado sin necesidad de scroll */
     width: 100%;
     height: 100%;
     text-align: center;
-    padding: 20px;
+    padding: 15px 20px;
     box-sizing: border-box;
 }
 
@@ -35,7 +35,7 @@ html {
     display: flex;
 }
 
-/* Pantallas con mucho contenido: permiten desplazarse */
+/* Pantallas con mucho contenido: permiten desplazarse (dejamos solo las de progreso/tablas) */
 .screen.scrollable {
     justify-content: flex-start;
     overflow-y: auto;
@@ -45,10 +45,11 @@ html {
 
 /* Tipografía y textos */
 h1 {
-    font-size: 2.2rem;
-    margin-bottom: 5px;
+    font-size: 1.8rem;
+    margin-bottom: 10px;
     color: #E2A342;
     font-family: 'Ribeye Marrow', cursive;
+    flex-shrink: 0;
 }
 
 h2 {
@@ -66,9 +67,10 @@ p {
 
 /* Modificación de Logo */
 .logo {
-    max-width: 150px;
-    margin-top: -20px;
-    margin-bottom: 10px;
+    max-width: 140px; /* Logo grande */
+    margin-top: 0;
+    margin-bottom: 5px;
+    flex-shrink: 0;
 }
 
 .loading-text {
@@ -129,8 +131,8 @@ button:disabled {
 }
 
 .btn-small {
-    padding: 8px 16px;
-    font-size: 1rem;
+    padding: 8px 12px;
+    font-size: 0.95rem;
 }
 
 .btn-danger-small {
@@ -139,11 +141,28 @@ button:disabled {
     font-size: 0.9rem;
 }
 
-/* Pantalla de inicio: modo de juego */
+/* ----------------------------------------------------- */
+/* Pantalla de inicio: Modo de juego                     */
+/* ----------------------------------------------------- */
+
+.category-title {
+    font-family: 'Ribeye Marrow', cursive;
+    color: #E2A342;
+    font-size: 0.95rem;
+    margin: 5px 0; /* Más compacto para ahorrar espacio */
+    border-bottom: 1px solid rgba(226, 163, 66, 0.3);
+    padding-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    width: 100%;
+    max-width: 350px;
+    text-align: left;
+}
+
 .mode-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    display: flex;
+    flex-direction: column; 
+    gap: 8px; /* Reducido para que todo quepa sin scroll */
     width: 100%;
     max-width: 350px;
     margin-bottom: 10px;
@@ -151,30 +170,29 @@ button:disabled {
 
 .btn-mode {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
     width: 100%;
     margin: 0;
-    padding: 18px 10px;
+    padding: 12px 10px; /* Relleno vertical reducido */
     text-align: center;
-    border-radius: 14px;
-    background-color: var(--primary);
 }
 
 .btn-mode-versus {
-    background-color: #f59e0b;
-    color: #000;
+    background-color: var(--primary);
+    color: white;
 }
 
 .mode-icon {
-    font-size: 2rem;
-    line-height: 1;
+    display: none; 
 }
 
 .mode-title {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
+    font-family: 'Limelight', cursive;
+    color: #fff;
+    letter-spacing: 0.5px;
+    margin: 0;
 }
 
 .secondary-actions {
@@ -182,12 +200,14 @@ button:disabled {
     gap: 10px;
     justify-content: center;
     flex-wrap: wrap;
-    margin-top: 10px;
+    margin-top: 5px;
 }
 
 .secondary-actions button {
     margin-top: 0;
 }
+
+/* ----------------------------------------------------- */
 
 /* Pantalla de región */
 .region-subtitle {
@@ -196,7 +216,7 @@ button:disabled {
     font-size: 1rem;
 }
 
-/* Menú cuadrícula */
+/* Menú cuadrícula (usado en Selección de Región) */
 .menu-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -458,6 +478,7 @@ button:disabled {
     padding: 10px 14px;
     border-bottom: 1px solid #334155;
     font-family: Arial, sans-serif;
+    display: flex;
 }
 
 .records-list li:last-child {
