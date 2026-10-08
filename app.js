@@ -1,466 +1,1226 @@
 /* =======================================
+   CONFIGURACIÓN
+   ======================================= */
+const ROUNDS_PER_GAME = 10;
+const PROGRESS_KEY = "dondeQueda_progress";
+
+const REGION_NAMES = {
+  Todos: "Todo el mundo",
+  América: "América",
+  Europa: "Europa",
+  Asia: "Asia",
+  África: "África",
+  Oceanía: "Oceanía",
+};
+
+// Títulos según el nivel (a partir del último se repite)
+const LEVEL_TITLES = [
+  "Turista",
+  "Mochilero",
+  "Viajero",
+  "Explorador",
+  "Navegante",
+  "Cartógrafo",
+  "Aventurero",
+  "Trotamundos",
+  "Leyenda",
+];
+
+const MARKER_STYLE = {
+  radius: 5,
+  fillColor: "#3b82f6",
+  color: "#ffffff",
+  weight: 2,
+  fillOpacity: 1,
+};
+
+const COUNTRIES_STYLE = {
+  fillColor: "#1e293b",
+  weight: 1,
+  color: "#334155",
+  fillOpacity: 0.5,
+};
+
+/* =======================================
    ESTADO GLOBAL DEL JUEGO
    ======================================= */
 const state = {
-    mode: 'world', // 'world' o 'spain'
-    continent: 'Todos',
-    userLocation: null,
-    tempLocation: null,
-    currentHeading: 0,
-    targetData: null, // Guardará la ciudad (spain) o el polígono geojson (world)
-    targetCenterLatLng: null, // Para el indicador
-    countriesGeoJSON: null,
-    
-    // Elementos de mapas
-    selectionMap: null,
-    selectionMarker: null,
-    resultMap: null,
-    resultMapLayers: null
+  gameMode: 'ranked', // 'classic', 'ranked', 'local', 'online'
+  continent: "Todos",
+  userLocation: null,
+  userCountryId: null,
+  tempLocation: null,
+  currentHeading: 0,
+  targetData: null,
+  targetCenterLatLng: null,
+  countriesGeoJSON: null,
+
+  // Variables de corrección de brújula
+  lastHeading: null,
+  totalRotation: 0,
+
+  // Partida de un jugador (Classic / Ranked)
+  single: { round: 1, score: 0, hits: 0 },
+
+  // Variables de jugadores (Local / Online)
+  players: [
+    { name: "", score: 0, hits: 0 },
+    { name: "", score: 0, hits: 0 },
+  ],
+  currentPlayerIdx: 0,
+  turn: 1,
+
+  // Elementos de mapas
+  selectionMap: null,
+  selectionMarker: null,
+  resultMap: null,
+  resultMapLayers: null,
 };
 
 /* =======================================
    REFERENCIAS AL DOM
    ======================================= */
 const screens = {
-    start: document.getElementById('start-screen'),
-    credits: document.getElementById('credits-screen'),
-    location: document.getElementById('location-screen'),
-    game: document.getElementById('game-screen'),
-    result: document.getElementById('result-screen')
+  start: document.getElementById("start-screen"),
+  region: document.getElementById("region-screen"),
+  credits: document.getElementById("credits-screen"),
+  names: document.getElementById("names-screen"),
+  leaderboard: document.getElementById("leaderboard-screen"),
+  progress: document.getElementById("progress-screen"),
+  location: document.getElementById("location-screen"),
+  game: document.getElementById("game-screen"),
+  result: document.getElementById("result-screen"),
+  midgame: document.getElementById("midgame-screen"),
+  summary: document.getElementById("summary-screen"),
 };
 
 const UI = {
-    btnCredits: document.getElementById('btn-credits-float'),
-    btnCreditsBack: document.getElementById('btn-back-credits'),
-    menuContainer: document.getElementById('menu-container'),
-    startLoading: document.getElementById('start-loading-text'),
-    btnSavedLoc: document.getElementById('btn-saved-location'),
-    btnConfirmLoc: document.getElementById('btn-confirm-location'),
-    locLoading: document.getElementById('location-loading-text'),
-    compassDial: document.getElementById('compass-dial'),
-    debugInfo: document.getElementById('debug-info'),
-    targetName: document.getElementById('target-name'),
-    resultTitle: document.getElementById('result-title'),
-    indicator: document.getElementById('offscreen-indicator')
+  // Pantalla de inicio (modo de juego)
+  btnModeClassic: document.getElementById("btn-mode-classic"),
+  btnModeRanked: document.getElementById("btn-mode-ranked"),
+  btnModeLocal: document.getElementById("btn-mode-local"),
+  btnModeOnline: document.getElementById("btn-mode-online"),
+  btnShowProgress: document.getElementById("btn-show-progress"),
+  btnShowScores: document.getElementById("btn-show-scores"),
+  btnCredits: document.getElementById("btn-credits-float"),
+  btnCreditsBack: document.getElementById("btn-back-credits"),
+
+  // Pantalla de región
+  regionSubtitle: document.getElementById("region-subtitle"),
+  menuContainer: document.getElementById("menu-container"),
+  startLoading: document.getElementById("start-loading-text"),
+  btnBackRegion: document.getElementById("btn-back-region"),
+
+  // Pantalla Nombres Versus / Online
+  namesTitle: document.getElementById("names-title"),
+  inputP1: document.getElementById("input-p1"),
+  inputP2: document.getElementById("input-p2"),
+  btnConfirmNames: document.getElementById("btn-confirm-names"),
+  btnBackNames: document.getElementById("btn-back-names"),
+
+  // Pantalla Leaderboard
+  leaderboardWinnerTitle: document.getElementById("leaderboard-winner-title"),
+  leaderboardGeneralTitle: document.getElementById("leaderboard-general-title"),
+  leaderboardColLocal: document.getElementById("col-local"),
+  leaderboardColOnline: document.getElementById("col-online"),
+  leaderboardLocal: document.getElementById("leaderboard-list-local"),
+  leaderboardOnline: document.getElementById("leaderboard-list-online"),
+  endgameActions: document.getElementById("endgame-actions"),
+  standardActions: document.getElementById("standard-actions"),
+  btnBackLeaderboard: document.getElementById("btn-back-leaderboard"),
+  btnClearScores: document.getElementById("btn-clear-scores"),
+  btnVersusRestart: document.getElementById("btn-versus-restart"),
+  btnVersusNew: document.getElementById("btn-versus-new"),
+  btnVersusExit: document.getElementById("btn-versus-exit"),
+
+  // Pantalla de progreso
+  progressLevelName: document.getElementById("progress-level-name"),
+  progressLevelFill: document.getElementById("progress-level-fill"),
+  progressLevelText: document.getElementById("progress-level-text"),
+  statGames: document.getElementById("stat-games"),
+  statHits: document.getElementById("stat-hits"),
+  statAccuracy: document.getElementById("stat-accuracy"),
+  recordsList: document.getElementById("records-list"),
+  btnBackProgress: document.getElementById("btn-back-progress"),
+  btnResetProgress: document.getElementById("btn-reset-progress"),
+
+  // Pantalla Ubicación
+  btnConfirmLoc: document.getElementById("btn-confirm-location"),
+  btnBackLoc: document.getElementById("btn-back-loc"),
+  locLoading: document.getElementById("location-loading-text"),
+
+  // Pantalla Juego
+  currentPlayerDisplay: document.getElementById("current-player-display"),
+  roundInfo: document.getElementById("round-info"),
+  compassDial: document.getElementById("compass-dial"),
+  debugInfo: document.getElementById("debug-info"),
+  targetName: document.getElementById("target-name"),
+
+  // Pantalla Resultados
+  resultTitle: document.getElementById("result-title"),
+  turnPointsDisplay: document.getElementById("turn-points-display"),
+  resultErrorDetails: document.getElementById("result-error-details"),
+  btnRestart: document.getElementById("btn-restart"),
+  btnChangeRegion: document.getElementById("btn-change-region"),
+
+  // Pantalla Mitad de Partida
+  midgameTitle: document.getElementById("midgame-title"),
+  midgameDiff: document.getElementById("midgame-diff"),
+  midgameList: document.getElementById("midgame-list"),
+  btnMidgameContinue: document.getElementById("btn-midgame-continue"),
+  btnMidgameEnd: document.getElementById("btn-midgame-end"),
+
+  // Pantalla de resumen (un jugador)
+  summaryRegion: document.getElementById("summary-region"),
+  summaryScore: document.getElementById("summary-score"),
+  summaryHits: document.getElementById("summary-hits"),
+  summaryRecord: document.getElementById("summary-record"),
+  summaryLevelName: document.getElementById("summary-level-name"),
+  summaryXpGain: document.getElementById("summary-xp-gain"),
+  summaryLevelFill: document.getElementById("summary-level-fill"),
+  summaryLevelText: document.getElementById("summary-level-text"),
+  summaryLevelUp: document.getElementById("summary-level-up"),
+  btnSummaryAgain: document.getElementById("btn-summary-again"),
+  btnSummaryRegion: document.getElementById("btn-summary-region"),
+  btnSummaryMenu: document.getElementById("btn-summary-menu"),
 };
+
+/* =======================================
+   PROGRESO Y NIVELES
+   ======================================= */
+function emptyProgress() {
+  return { xp: 0, gamesPlayed: 0, totalHits: 0, bestByRegion: {} };
+}
+
+function loadProgress() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
+    if (saved) return { ...emptyProgress(), ...saved };
+  } catch {}
+  return emptyProgress();
+}
+
+function saveProgress(progress) {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+}
+
+function xpForLevel(level) {
+  return 250 * level * (level - 1);
+}
+
+function getLevelInfo(xp) {
+  let level = 1;
+  while (xp >= xpForLevel(level + 1)) level++;
+  const base = xpForLevel(level);
+  const next = xpForLevel(level + 1);
+  return {
+    level,
+    title: LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)],
+    xpInLevel: xp - base,
+    xpNeeded: next - base,
+    progress: (xp - base) / (next - base),
+  };
+}
+
+function renderLevelCard(nameEl, fillEl, textEl, info) {
+  nameEl.textContent = `Nivel ${info.level} · ${info.title}`;
+  fillEl.style.width = `${Math.round(info.progress * 100)}%`;
+  textEl.textContent = `${info.xpInLevel} / ${info.xpNeeded} XP para el nivel ${info.level + 1}`;
+}
+
+function updateRegionBests() {
+  const progress = loadProgress();
+  document.querySelectorAll(".btn-menu").forEach((btn) => {
+    let span = btn.querySelector(".region-best");
+    if (!span) {
+      span = document.createElement("span");
+      span.className = "region-best";
+      btn.appendChild(span);
+    }
+    const best = progress.bestByRegion[btn.dataset.region];
+    // Se muestra solo si estamos en Ranked (que es el modo que usa puntuaciones de progreso)
+    span.textContent = (state.gameMode === 'ranked') && best ? `Récord: ${best.score}` : "";
+    span.style.display = span.textContent ? "" : "none";
+  });
+}
+
+function renderProgressScreen() {
+  const progress = loadProgress();
+  renderLevelCard(
+    UI.progressLevelName,
+    UI.progressLevelFill,
+    UI.progressLevelText,
+    getLevelInfo(progress.xp),
+  );
+
+  UI.statGames.textContent = progress.gamesPlayed;
+  UI.statHits.textContent = progress.totalHits;
+  const totalRounds = progress.gamesPlayed * ROUNDS_PER_GAME;
+  UI.statAccuracy.textContent = totalRounds
+    ? `${Math.round((progress.totalHits / totalRounds) * 100)}%`
+    : "0%";
+
+  UI.recordsList.innerHTML = "";
+  Object.entries(REGION_NAMES).forEach(([key, name]) => {
+    const best = progress.bestByRegion[key];
+    const li = document.createElement("li");
+    li.innerHTML = best
+      ? `<span>${name}</span><span><b>${best.score}</b> pts · ${best.hits}/${ROUNDS_PER_GAME}</span>`
+      : `<span>${name}</span><span class="record-empty">—</span>`;
+    UI.recordsList.appendChild(li);
+  });
+}
+
+function animateLevelBar(fillEl, fromProgress, toProgress) {
+  fillEl.style.transition = "none";
+  fillEl.style.width = `${Math.round(fromProgress * 100)}%`;
+  void fillEl.offsetWidth; 
+  fillEl.style.transition = "";
+  setTimeout(() => {
+    fillEl.style.width = `${Math.round(toProgress * 100)}%`;
+  }, 150);
+}
+
+function finishSingleGame() {
+  const progress = loadProgress();
+  const before = getLevelInfo(progress.xp);
+  const { score, hits } = state.single;
+  const region = state.continent;
+  const prevBest = progress.bestByRegion[region];
+  const isRecord = !prevBest || score > prevBest.score;
+
+  progress.xp += score;
+  progress.gamesPlayed++;
+  progress.totalHits += hits;
+  if (isRecord) {
+    progress.bestByRegion[region] = {
+      score,
+      hits,
+      date: new Date().toISOString(),
+    };
+  }
+  saveProgress(progress);
+
+  const after = getLevelInfo(progress.xp);
+
+  UI.summaryRegion.textContent = REGION_NAMES[region];
+  UI.summaryScore.textContent = score;
+  UI.summaryHits.textContent = `${hits} de ${ROUNDS_PER_GAME} aciertos`;
+
+  if (!prevBest) {
+    UI.summaryRecord.textContent = "🏅 ¡Primer récord en esta región!";
+  } else if (isRecord) {
+    UI.summaryRecord.textContent = `🏆 ¡Nuevo récord! (antes: ${prevBest.score})`;
+  } else {
+    UI.summaryRecord.textContent = `Tu récord aquí: ${prevBest.score}`;
+  }
+  UI.summaryRecord.classList.toggle("is-record", isRecord);
+
+  renderLevelCard(
+    UI.summaryLevelName,
+    UI.summaryLevelFill,
+    UI.summaryLevelText,
+    after,
+  );
+  UI.summaryXpGain.textContent = `+${score} XP`;
+
+  const leveledUp = after.level > before.level;
+  animateLevelBar(
+    UI.summaryLevelFill,
+    leveledUp ? 0 : before.progress,
+    after.progress,
+  );
+
+  if (leveledUp) {
+    UI.summaryLevelUp.textContent = `⬆️ ¡Subes a nivel ${after.level}: ${after.title}!`;
+    UI.summaryLevelUp.style.display = "";
+  } else {
+    UI.summaryLevelUp.style.display = "none";
+  }
+
+  showScreen("summary");
+}
+
+function resetSingleGame() {
+  state.single = { round: 1, score: 0, hits: 0 };
+}
 
 /* =======================================
    NAVEGACIÓN Y PANTALLAS
    ======================================= */
 function showScreen(screenName) {
-    Object.values(screens).forEach(s => s.classList.remove('active'));
-    screens[screenName].classList.add('active');
-    
-    // Ocultar botón de créditos flotante si no es inicio
-    UI.btnCredits.style.display = screenName === 'start' ? 'flex' : 'none';
+  Object.values(screens).forEach((s) => s.classList.remove("active"));
+  screens[screenName].classList.add("active");
+
+  UI.btnCredits.style.display = screenName === "start" ? "flex" : "none";
 }
 
-UI.btnCredits.addEventListener('click', () => showScreen('credits'));
-UI.btnCreditsBack.addEventListener('click', () => showScreen('start'));
+function returnToMenu() {
+  state.gameMode = null;
+  showScreen("start");
+}
 
-// Seleccionador del Menú
-document.querySelectorAll('.btn-menu').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        const region = e.target.dataset.region;
-        if (!region) return;
+function goToRegionSelect() {
+  UI.menuContainer.style.display = "grid";
+  UI.startLoading.style.display = "none";
+  UI.btnBackRegion.style.display = "";
+  
+  if (state.gameMode === 'local') {
+      UI.regionSubtitle.textContent = `Local: ${state.players[0].name} vs ${state.players[1].name}`;
+  } else if (state.gameMode === 'online') {
+      UI.regionSubtitle.textContent = `Online: ${state.players[0].name}`;
+  } else if (state.gameMode === 'ranked') {
+      UI.regionSubtitle.textContent = `Ranked · ${ROUNDS_PER_GAME} rondas`;
+  } else {
+      UI.regionSubtitle.textContent = `Clásico · Infinito`;
+  }
+  
+  updateRegionBests();
+  showScreen("region");
+}
 
-        if (region === "España") {
-            state.mode = 'spain';
-            prepareLocationScreen();
-        } else {
-            state.mode = 'world';
-            state.continent = region;
-            
-            UI.menuContainer.style.display = 'none';
-            UI.startLoading.style.display = 'block';
+// --- Pantalla de inicio: elegir modo ---
+UI.btnModeClassic.addEventListener("click", () => {
+  state.gameMode = 'classic';
+  goToRegionSelect();
+});
 
-            if (!state.countriesGeoJSON) {
-                try {
-                    let geoRes = await fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json');
-                    state.countriesGeoJSON = await geoRes.json();
-                } catch (error) {
-                    alert("Error al descargar mapas. Revisa tu conexión.");
-                    UI.menuContainer.style.display = 'grid';
-                    UI.startLoading.style.display = 'none';
-                    return;
-                }
-            }
-            
-            UI.startLoading.style.display = 'none';
-            prepareLocationScreen();
+UI.btnModeRanked.addEventListener("click", () => {
+  state.gameMode = 'ranked';
+  goToRegionSelect();
+});
+
+UI.btnModeLocal.addEventListener("click", () => {
+  state.gameMode = 'local';
+  UI.namesTitle.textContent = "Nombres de los Jugadores";
+  UI.inputP2.style.display = "block";
+  UI.inputP1.value = "";
+  UI.inputP2.value = "";
+  showScreen("names");
+});
+
+UI.btnModeOnline.addEventListener("click", () => {
+  state.gameMode = 'online';
+  UI.namesTitle.textContent = "Tu Nombre (Online)";
+  UI.inputP2.style.display = "none";
+  const savedName = localStorage.getItem("dondeQueda_onlineName") || "";
+  UI.inputP1.value = savedName;
+  showScreen("names");
+});
+
+UI.btnShowProgress.addEventListener("click", () => {
+  renderProgressScreen();
+  showScreen("progress");
+});
+
+UI.btnShowScores.addEventListener("click", () => {
+  renderLeaderboard(false);
+  showScreen("leaderboard");
+});
+
+UI.btnCredits.addEventListener("click", () => showScreen("credits"));
+UI.btnCreditsBack.addEventListener("click", returnToMenu);
+
+// --- Pantalla de progreso ---
+UI.btnBackProgress.addEventListener("click", returnToMenu);
+
+UI.btnResetProgress.addEventListener("click", () => {
+  if (
+    confirm(
+      "¿Seguro que quieres borrar tu progreso? Perderás tu nivel y tus récords.",
+    )
+  ) {
+    localStorage.removeItem(PROGRESS_KEY);
+    renderProgressScreen();
+  }
+});
+
+// --- Pantalla de nombres (Local/Online) ---
+UI.btnConfirmNames.addEventListener("click", () => {
+  const p1 = UI.inputP1.value.trim() || "Jugador 1";
+  
+  if (state.gameMode === 'local') {
+      const p2 = UI.inputP2.value.trim() || "Jugador 2";
+      if (p1.toLowerCase() === p2.toLowerCase()) {
+          alert("Los nombres no pueden ser iguales.");
+          UI.inputP2.focus();
+          return;
+      }
+      state.players = [
+          { name: p1, score: 0, hits: 0 },
+          { name: p2, score: 0, hits: 0 },
+      ];
+  } else if (state.gameMode === 'online') {
+      localStorage.setItem("dondeQueda_onlineName", p1);
+      state.players = [
+          { name: p1, score: 0, hits: 0 }
+      ];
+  }
+  
+  state.currentPlayerIdx = 0;
+  state.turn = 1;
+  goToRegionSelect();
+});
+
+UI.btnBackNames.addEventListener("click", returnToMenu);
+
+// --- Pantalla de región ---
+UI.btnBackRegion.addEventListener("click", () => {
+  if (state.gameMode === 'local' || state.gameMode === 'online')
+    showScreen("names"); 
+  else returnToMenu();
+});
+
+document.querySelectorAll(".btn-menu").forEach((btn) => {
+  btn.addEventListener("click", async (e) => {
+    const region = e.currentTarget.dataset.region;
+    if (!region) return;
+
+    state.continent = region;
+
+    if (state.gameMode === 'local' || state.gameMode === 'online') {
+      state.players.forEach((p) => {
+          p.score = 0;
+          p.hits = 0;
+      });
+      state.currentPlayerIdx = 0;
+      state.turn = 1;
+    } else {
+      resetSingleGame();
+    }
+
+    await loadAssetsAndPrepareLoc();
+  });
+});
+
+async function loadAssetsAndPrepareLoc() {
+  if (!state.countriesGeoJSON) {
+    UI.menuContainer.style.display = "none";
+    UI.btnBackRegion.style.display = "none";
+    UI.startLoading.style.display = "block";
+
+    try {
+      let geoRes = await fetch(
+        "https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json",
+      );
+      state.countriesGeoJSON = await geoRes.json();
+    } catch (error) {
+      alert("Error al descargar mapas. Revisa tu conexión.");
+      goToRegionSelect();
+      return;
+    }
+
+    UI.menuContainer.style.display = "grid";
+    UI.btnBackRegion.style.display = "";
+    UI.startLoading.style.display = "none";
+  }
+  prepareLocationScreen();
+}
+
+// --- Otras navegaciones ---
+UI.btnBackLeaderboard.addEventListener("click", returnToMenu);
+UI.btnVersusExit.addEventListener("click", returnToMenu);
+UI.btnVersusNew.addEventListener("click", () => {
+    if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names");
+});
+
+UI.btnBackLoc.addEventListener("click", goToRegionSelect);
+
+UI.btnChangeRegion.addEventListener("click", () => {
+  if (state.gameMode === 'classic') {
+    goToRegionSelect();
+    return;
+  }
+  
+  let msg = "¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.";
+  
+  if (confirm(msg)) {
+    if (state.gameMode === 'local' || state.gameMode === 'online') returnToMenu();
+    else goToRegionSelect();
+  }
+});
+
+// --- Pantalla a Mitad de Partida ---
+function showMidgameScreen() {
+    const p1 = state.players[0];
+    const p2 = state.players[1];
+    let diff = Math.abs(p1.score - p2.score);
+    
+    if (p1.score > p2.score) {
+        UI.midgameTitle.textContent = `¡${p1.name} va ganando!`;
+    } else if (p2.score > p1.score) {
+        UI.midgameTitle.textContent = `¡${p2.name} va ganando!`;
+    } else {
+        UI.midgameTitle.textContent = `¡Están empatados!`;
+    }
+    
+    UI.midgameDiff.textContent = `Diferencia: ${diff} pts`;
+    
+    UI.midgameList.innerHTML = "";
+    let sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
+    
+    // Al finalizar el turno 6 de la partida, cada jugador ha jugado exactamente 3 rondas
+    let rounds = 3; 
+
+    sortedPlayers.forEach((p, index) => {
+        let accuracy = Math.round((p.hits / rounds) * 100) || 0;
+        let li = document.createElement("li");
+        li.innerHTML = `<span>${index + 1}. ${p.name}</span><span style="text-align: right;">${p.score} pts<br><span style="font-size: 0.85rem; color: #94a3b8; font-weight: normal; line-height: 1.4; display: inline-block; margin-top: 2px;">${p.hits}/${rounds} aciertos (${accuracy}%)</span></span>`;
+        if (index === 0 && sortedPlayers[0].score !== sortedPlayers[1].score) {
+            li.classList.add("highlight-gold");
         }
+        UI.midgameList.appendChild(li);
     });
-});
+    
+    showScreen("midgame");
+}
 
-document.getElementById('btn-change-region').addEventListener('click', () => {
-    UI.indicator.style.display = 'none';
-    UI.menuContainer.style.display = 'grid'; 
-    showScreen('start');
-});
-
-document.getElementById('btn-restart').addEventListener('click', () => {
-    UI.indicator.style.display = 'none';
+UI.btnMidgameContinue.addEventListener("click", () => {
+    state.turn++;
+    state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2;
     startNewRound();
 });
+
+UI.btnMidgameEnd.addEventListener("click", () => {
+    endLocalGame();
+});
+
+function endLocalGame() {
+    const p1 = state.players[0];
+    const p2 = state.players[1];
+    
+    if (p1.score > p2.score) {
+        UI.leaderboardWinnerTitle.textContent = `¡Ha ganado ${p1.name}!`;
+    } else if (p2.score > p1.score) {
+        UI.leaderboardWinnerTitle.textContent = `¡Ha ganado ${p2.name}!`;
+    } else {
+        UI.leaderboardWinnerTitle.textContent = `¡Habéis empatado!`;
+    }
+    
+    UI.leaderboardWinnerTitle.style.display = "block";
+    
+    saveScores('local');
+    renderLeaderboard(true);
+    showScreen("leaderboard");
+}
+
+function endOnlineGame() {
+    UI.leaderboardWinnerTitle.textContent = `¡Partida Terminada!`;
+    UI.leaderboardWinnerTitle.style.display = "block";
+    
+    saveScores('online');
+    renderLeaderboard(true);
+    showScreen("leaderboard");
+}
+
+
+// --- Pantalla de resumen (un jugador) ---
+UI.btnSummaryAgain.addEventListener("click", () => {
+  resetSingleGame();
+  startNewRound(); 
+});
+UI.btnSummaryRegion.addEventListener("click", goToRegionSelect);
+UI.btnSummaryMenu.addEventListener("click", returnToMenu);
 
 /* =======================================
    PREPARACIÓN Y SELECCIÓN DE UBICACIÓN
    ======================================= */
 function prepareLocationScreen() {
-    showScreen('location');
-    
-    const savedLocStr = localStorage.getItem('dondeQueda_location');
-    let savedLoc = null;
-    
-    if (savedLocStr) {
-        savedLoc = JSON.parse(savedLocStr);
-        state.tempLocation = savedLoc;
-        UI.btnSavedLoc.style.display = 'block'; 
-        UI.btnConfirmLoc.disabled = false; 
-    }
+  showScreen("location");
 
-    if (!state.selectionMap) {
-        const startCenter = savedLoc ? [savedLoc[1], savedLoc[0]] : (state.mode === 'spain' ? [40.0, -3.0] : [20, 0]);
-        const startZoom = savedLoc ? (state.mode === 'spain' ? 5 : 4) : (state.mode === 'spain' ? 5 : 1);
-        
-        state.selectionMap = L.map('select-map-container', { zoomControl: false, attributionControl: false }).setView(startCenter, startZoom);
-        
-        // Asignar los estilos según el modo
-        if (state.mode === 'spain') {
-            L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.selectionMap);
-        } else {
-            L.geoJSON(state.countriesGeoJSON, {
-                style: { fillColor: '#1e293b', weight: 1, color: '#334155', fillOpacity: 0.5 }
-            }).addTo(state.selectionMap);
-        }
-        
-        if (savedLoc) {
-            state.selectionMarker = state.mode === 'spain' 
-                ? L.marker([savedLoc[1], savedLoc[0]]).addTo(state.selectionMap)
-                : L.circleMarker([savedLoc[1], savedLoc[0]], { radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1 }).addTo(state.selectionMap);
-        }
+  const center = [20, 0];
+  const zoom = 1;
 
-        state.selectionMap.on('click', (ev) => {
-            state.tempLocation = [ev.latlng.lng, ev.latlng.lat];
-            
-            if (!state.selectionMarker) {
-                state.selectionMarker = state.mode === 'spain'
-                    ? L.marker(ev.latlng).addTo(state.selectionMap)
-                    : L.circleMarker(ev.latlng, { radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1 }).addTo(state.selectionMap);
-            } else {
-                state.selectionMarker.setLatLng(ev.latlng);
-            }
-            UI.btnConfirmLoc.disabled = false;
-        });
-    } else {
-        // Limpiar el mapa existente y rehacer la vista si cambiamos de modo
-        state.selectionMap.eachLayer((layer) => state.selectionMap.removeLayer(layer));
-        const center = savedLoc ? [savedLoc[1], savedLoc[0]] : (state.mode === 'spain' ? [40.0, -3.0] : [20, 0]);
-        const zoom = savedLoc ? (state.mode === 'spain' ? 5 : 4) : (state.mode === 'spain' ? 5 : 1);
-        state.selectionMap.setView(center, zoom);
+  if (!state.selectionMap) {
+    state.selectionMap = L.map("select-map-container", {
+      zoomControl: false,
+      attributionControl: false,
+    });
 
-        if (state.mode === 'spain') {
-            L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.selectionMap);
-        } else {
-            L.geoJSON(state.countriesGeoJSON, {
-                style: { fillColor: '#1e293b', weight: 1, color: '#334155', fillOpacity: 0.5 }
-            }).addTo(state.selectionMap);
-        }
+    state.selectionMap.on("click", (ev) => {
+      state.tempLocation = [ev.latlng.lng, ev.latlng.lat];
 
-        if (state.tempLocation) {
-            state.selectionMarker = state.mode === 'spain'
-                ? L.marker([state.tempLocation[1], state.tempLocation[0]]).addTo(state.selectionMap)
-                : L.circleMarker([state.tempLocation[1], state.tempLocation[0]], { radius: 5, fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1 }).addTo(state.selectionMap);
-        }
-    }
-    
-    setTimeout(() => state.selectionMap.invalidateSize(), 200); 
+      if (!state.selectionMarker) {
+        state.selectionMarker = L.circleMarker(ev.latlng, MARKER_STYLE).addTo(
+          state.selectionMap,
+        );
+      } else {
+        state.selectionMarker.setLatLng(ev.latlng);
+      }
+      UI.btnConfirmLoc.disabled = false;
+    });
+  } else {
+    state.selectionMap.eachLayer((layer) =>
+      state.selectionMap.removeLayer(layer),
+    );
+    state.selectionMarker = null;
+  }
+
+  state.selectionMap.setView(center, zoom);
+  L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(
+    state.selectionMap,
+  );
+
+  if (state.tempLocation) {
+    state.selectionMarker = L.circleMarker(
+      [state.tempLocation[1], state.tempLocation[0]],
+      MARKER_STYLE,
+    ).addTo(state.selectionMap);
+  }
+
+  setTimeout(() => state.selectionMap.invalidateSize(), 200);
 }
 
 /* =======================================
    INICIALIZACIÓN SESIÓN / GPS / BRÚJULA
    ======================================= */
 async function initializeGameSession(source) {
-    UI.locLoading.style.display = 'block';
-    
-    try {
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            const permission = await DeviceOrientationEvent.requestPermission();
-            if (permission !== 'granted') {
-                alert("Debes permitir el acceso a la brújula para poder jugar.");
-                UI.locLoading.style.display = 'none';
-                return; 
-            }
-        }
+  UI.locLoading.style.display = "block";
 
-        if (source === 'gps') {
-            UI.locLoading.textContent = "Obteniendo tu GPS...";
-            state.userLocation = await getUserLocation();
-        } else if (source === 'map') {
-            UI.locLoading.textContent = "Procesando mapa...";
-            state.userLocation = state.tempLocation;
-        } else if (source === 'saved') {
-            UI.locLoading.textContent = "Cargando datos...";
-            state.userLocation = JSON.parse(localStorage.getItem('dondeQueda_location'));
-        }
-
-        if (state.userLocation) {
-            localStorage.setItem('dondeQueda_location', JSON.stringify(state.userLocation));
-        }
-
-        startCompass();
-        startNewRound();
-        UI.locLoading.style.display = 'none';
-        
-    } catch (error) {
-        console.error("Error:", error);
-        alert("Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación.");
-        UI.locLoading.style.display = 'none';
+  try {
+    if (
+      typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function"
+    ) {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission !== "granted") {
+        alert("Debes permitir el acceso a la brújula para poder jugar.");
+        UI.locLoading.style.display = "none";
+        return;
+      }
     }
+
+    if (source === "gps") {
+      UI.locLoading.textContent = "Obteniendo tu GPS...";
+      state.userLocation = await getUserLocation();
+    } else if (source === "map") {
+      UI.locLoading.textContent = "Procesando mapa...";
+      state.userLocation = state.tempLocation;
+    }
+
+    state.userCountryId = findCountryAt(state.userLocation);
+
+    startCompass();
+    startNewRound();
+    UI.locLoading.style.display = "none";
+  } catch (error) {
+    console.error("Error:", error);
+    alert(
+      "Hubo un problema. Asegúrate de activar y permitir el uso de la ubicación.",
+    );
+    UI.locLoading.style.display = "none";
+  }
 }
 
-document.getElementById('btn-gps').addEventListener('click', () => initializeGameSession('gps'));
-document.getElementById('btn-confirm-location').addEventListener('click', () => initializeGameSession('map'));
-document.getElementById('btn-saved-location').addEventListener('click', () => initializeGameSession('saved'));
+function findCountryAt(location) {
+  if (!location || !state.countriesGeoJSON) return null;
+  const pt = turf.point(location);
+  const country = state.countriesGeoJSON.features.find((f) => {
+    try {
+      return turf.booleanPointInPolygon(pt, f);
+    } catch {
+      return false;
+    }
+  });
+  return country ? country.id : null;
+}
 
-function getUserLocation() {
-    return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) reject(new Error("Tu navegador no soporta geolocalización."));
-        navigator.geolocation.getCurrentPosition(
-            (pos) => resolve([pos.coords.longitude, pos.coords.latitude]),
-            (err) => reject(new Error("No se pudo obtener la ubicación.")),
-            { enableHighAccuracy: true, timeout: 10000 }
-        );
-    });
+document
+  .getElementById("btn-gps")
+  .addEventListener("click", () => initializeGameSession("gps"));
+document
+  .getElementById("btn-confirm-location")
+  .addEventListener("click", () => initializeGameSession("map"));
+
+async function getUserLocation() {
+  if (
+    typeof Capacitor !== "undefined" &&
+    Capacitor.Plugins &&
+    Capacitor.Plugins.Geolocation
+  ) {
+    try {
+      const { Geolocation } = Capacitor.Plugins;
+      let permStatus = await Geolocation.checkPermissions();
+
+      if (permStatus.location !== "granted") {
+        permStatus = await Geolocation.requestPermissions();
+      }
+
+      if (permStatus.location !== "granted") {
+        throw new Error("Permisos de ubicación denegados por el usuario.");
+      }
+
+      const pos = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+      });
+      return [pos.coords.longitude, pos.coords.latitude];
+    } catch (e) {
+      console.error("Error al obtener ubicación nativa:", e);
+      throw e;
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation)
+      return reject(new Error("Tu navegador no soporta geolocalización."));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve([pos.coords.longitude, pos.coords.latitude]),
+      (err) => reject(new Error("No se pudo obtener la ubicación.")),
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  });
 }
 
 function startCompass() {
-    window.addEventListener('deviceorientationabsolute', handleOrientation);
-    window.addEventListener('deviceorientation', handleOrientation);
+  window.addEventListener("deviceorientationabsolute", handleOrientation);
+  window.addEventListener("deviceorientation", handleOrientation);
 }
 
 function handleOrientation(event) {
-    let heading = null;
-    if (event.webkitCompassHeading != null) heading = event.webkitCompassHeading;
-    else if (event.alpha !== null) { heading = 360 - event.alpha; if (heading === 360) heading = 0; }
+  let heading = null;
+  if (event.webkitCompassHeading != null) heading = event.webkitCompassHeading;
+  else if (event.alpha !== null) {
+    heading = 360 - event.alpha;
+    if (heading === 360) heading = 0;
+  }
 
-    if (heading !== null) {
-        state.currentHeading = heading;
-        UI.compassDial.style.transform = `rotate(${-heading}deg)`;
-        UI.debugInfo.innerText = `Rumbo: ${Math.round(heading)}°`;
+  if (heading !== null) {
+    state.currentHeading = heading;
+
+    if (state.lastHeading === null) {
+      state.totalRotation = -heading;
+    } else {
+      let delta = heading - state.lastHeading;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      state.totalRotation -= delta;
     }
+
+    state.lastHeading = heading;
+
+    UI.compassDial.style.transform = `rotate(${state.totalRotation}deg)`;
+    UI.debugInfo.innerText = `Rumbo: ${Math.round(heading)}°`;
+  }
 }
 
 /* =======================================
    LÓGICA DEL JUEGO
    ======================================= */
 function startNewRound() {
-    showScreen('game');
-    
-    if (state.mode === 'spain') {
-        state.targetData = citiesData[Math.floor(Math.random() * citiesData.length)];
-        UI.targetName.textContent = state.targetData.name;
-        state.targetCenterLatLng = L.latLng(state.targetData.lat, state.targetData.lng);
-    } else {
-        const validCountries = state.countriesGeoJSON.features.filter(f => {
-            const inDict = dictionary[f.id];
-            if (!inDict) return false;
-            // Evitar que aparezca España en la selección si estamos en "Todos"
-            if (state.continent === "Todos" && f.id === "ESP") return false;
-            
-            if (state.continent === "Todos") return true;
-            return inDict.continent === state.continent;
-        });
-        state.targetData = validCountries[Math.floor(Math.random() * validCountries.length)];
-        UI.targetName.textContent = dictionary[state.targetData.id].name;
-        
-        const center = turf.centroid(state.targetData).geometry.coordinates;
-        state.targetCenterLatLng = L.latLng(center[1], center[0]);
-    }
+  showScreen("game");
+  UI.resultErrorDetails.style.display = "none";
+  UI.turnPointsDisplay.style.display = "none";
+
+  if (state.gameMode === 'local') {
+    const player = state.players[state.currentPlayerIdx];
+    UI.currentPlayerDisplay.textContent = `Turno de ${player.name}`;
+    UI.currentPlayerDisplay.style.display = "block";
+    UI.roundInfo.textContent = `Turno ${Math.ceil(state.turn / 2)} de 5 · ${player.score} pts`;
+  } else if (state.gameMode === 'online') {
+    const player = state.players[0];
+    UI.currentPlayerDisplay.textContent = player.name;
+    UI.currentPlayerDisplay.style.display = "block";
+    UI.roundInfo.textContent = `Ronda ${state.turn} de 10 · ${player.score} pts`;
+  } else if (state.gameMode === 'ranked') {
+    UI.currentPlayerDisplay.style.display = "none";
+    UI.roundInfo.textContent = `Ronda ${state.single.round} de ${ROUNDS_PER_GAME} · ${state.single.score} pts`;
+  } else if (state.gameMode === 'classic') {
+    UI.currentPlayerDisplay.style.display = "none";
+    UI.roundInfo.textContent = `Modo Libre · Ronda ${state.single.round}`;
+  }
+
+  const previousId = state.targetData ? state.targetData.id : null;
+
+  let validCountries = state.countriesGeoJSON.features.filter((f) => {
+    const inDict = dictionary[f.id];
+    if (!inDict) return false;
+    if (f.id === state.userCountryId) return false; 
+    if (state.continent === "Todos") return true;
+    return inDict.continent === state.continent;
+  });
+
+  if (validCountries.length > 1) {
+    validCountries = validCountries.filter((f) => f.id !== previousId);
+  }
+
+  state.targetData =
+    validCountries[Math.floor(Math.random() * validCountries.length)];
+  UI.targetName.textContent = dictionary[state.targetData.id].name.trim();
+
+  const center = turf.centroid(state.targetData).geometry.coordinates;
+  state.targetCenterLatLng = L.latLng(center[1], center[0]);
 }
 
-document.getElementById('btn-confirm').addEventListener('click', () => {
-    showScreen('result');
-    
-    let isHit = false;
-    let exactCollisionBeam = null;
+document.getElementById("btn-confirm").addEventListener("click", () => {
+  showScreen("result");
 
-    if (state.mode === 'spain') {
-        const targetPolygon = turf.circle([state.targetData.lng, state.targetData.lat], 20, {units: 'kilometers'});
-        const distanceToTarget = turf.distance(state.userLocation, [state.targetData.lng, state.targetData.lat], {units: 'kilometers'});
-        const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
-        
-        const linePoints = buildBeamString(rayLengthKm, 20);
-        exactCollisionBeam = turf.lineString(linePoints);
-        
-        const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
-        if (intersections.features.length > 0) isHit = true;
-        
-        const startPoint = turf.point(linePoints[0]);
-        if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
-        
-        // Guardamos el polígono en targetData para usarlo al dibujar
-        state.targetData.polygonGeometry = targetPolygon;
+  let isHit = false;
+  let errorLine = null;
 
+  const distanceToTarget = turf.distance(
+    state.userLocation,
+    [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat],
+    { units: "kilometers" },
+  );
+  const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
+
+  const linePoints = buildBeamString(rayLengthKm, 100, true);
+  const lines = breakLinesOnMeridian(linePoints);
+  const exactCollisionBeam = turf.featureCollection(lines);
+
+  const flattenedCountry = turf.flatten(state.targetData);
+  turf.featureEach(flattenedCountry, function (countryPart) {
+    turf.featureEach(exactCollisionBeam, function (linePart) {
+      const intersections = turf.lineIntersect(linePart, countryPart);
+      if (intersections.features.length > 0) isHit = true;
+
+      const startPoint = turf.point(linePart.geometry.coordinates[0]);
+      if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
+    });
+  });
+
+  const idealBearing = turf.bearing(state.userLocation, [
+    state.targetCenterLatLng.lng,
+    state.targetCenterLatLng.lat,
+  ]);
+  let headingNorm = state.currentHeading % 360;
+  let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
+
+  let errorAngle = Math.abs(headingNorm - bearingNorm);
+  if (errorAngle > 180) errorAngle = 360 - errorAngle;
+
+  let turnPoints = 0;
+
+  if (isHit) {
+    UI.resultTitle.textContent = "ACERTASTE ✅";
+    UI.resultTitle.style.color = "#4ade80";
+    UI.resultErrorDetails.style.display = "none";
+    turnPoints = 100;
+  } else {
+    UI.resultTitle.textContent = "FALLASTE ❌";
+    UI.resultTitle.style.color = "#f87171";
+
+    if (errorAngle <= 90) turnPoints = Math.round(75 * (1 - errorAngle / 90));
+    else turnPoints = 0;
+
+    let minDistance = Infinity;
+    let closestCountryPt = null;
+
+    const vertices = turf.explode(state.targetData);
+    const userPt = turf.point(state.userLocation);
+
+    turf.featureEach(vertices, function (pointFeature) {
+      const dist = turf.distance(userPt, pointFeature, { units: "kilometers" });
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestCountryPt = pointFeature;
+      }
+    });
+
+    if (closestCountryPt) {
+      let pt2 = closestCountryPt.geometry.coordinates;
+      if (state.userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
+      else if (pt2[0] - state.userLocation[0] > 180)
+        pt2 = [pt2[0] - 360, pt2[1]];
+      errorLine = turf.lineString([state.userLocation, pt2]);
+    }
+
+    UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
+    UI.resultErrorDetails.style.display = "block";
+  }
+
+  // Clásico no tiene puntos
+  if (state.gameMode === 'classic') turnPoints = 0;
+
+  if (state.gameMode === 'classic') {
+    UI.turnPointsDisplay.style.display = "none";
+  } else {
+    UI.turnPointsDisplay.textContent = `+${turnPoints} puntos`;
+    UI.turnPointsDisplay.style.display = "block";
+  }
+
+  if (state.gameMode === 'local') {
+    state.players[state.currentPlayerIdx].score += turnPoints;
+    if (isHit) state.players[state.currentPlayerIdx].hits++;
+
+    if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
+    else if (state.turn === 6) UI.btnRestart.textContent = "Ver Marcador";
+    else UI.btnRestart.textContent = "Siguiente Turno";
+  } else if (state.gameMode === 'online') {
+    state.players[0].score += turnPoints;
+    if (isHit) state.players[0].hits++;
+
+    if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
+    else UI.btnRestart.textContent = "Siguiente Ronda";
+  } else if (state.gameMode === 'ranked') {
+    state.single.score += turnPoints;
+    if (isHit) state.single.hits++;
+    UI.btnRestart.textContent = state.single.round >= ROUNDS_PER_GAME ? "Ver resultado" : "Siguiente ronda";
+  } else if (state.gameMode === 'classic') {
+    UI.btnRestart.textContent = "Siguiente ronda";
+  }
+
+  setTimeout(() => {
+    drawResultMap(exactCollisionBeam, isHit, errorLine);
+  }, 100);
+});
+
+UI.btnRestart.addEventListener("click", () => {
+  if (state.gameMode === 'local') {
+    if (state.turn === 6) { 
+      showMidgameScreen();
+    } else if (state.turn >= 10) {
+      endLocalGame();
     } else {
-        const distanceToTarget = turf.distance(state.userLocation, [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat], {units: 'kilometers'});
-        const rayLengthKm = Math.min(distanceToTarget + 1500, 20000); 
-        
-        const linePoints = buildBeamString(rayLengthKm, 100, true);
-        const lines = breakLinesOnMeridian(linePoints);
-        exactCollisionBeam = turf.featureCollection(lines);
+      state.turn++;
+      state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2;
+      startNewRound();
+    }
+  } else if (state.gameMode === 'online') {
+    if (state.turn >= 10) {
+      endOnlineGame();
+    } else {
+      state.turn++;
+      startNewRound();
+    }
+  } else if (state.gameMode === 'ranked') {
+    if (state.single.round >= ROUNDS_PER_GAME) {
+      finishSingleGame();
+    } else {
+      state.single.round++;
+      startNewRound();
+    }
+  } else if (state.gameMode === 'classic') {
+    state.single.round++;
+    startNewRound();
+  }
+});
 
-        const flattenedCountry = turf.flatten(state.targetData);
-        turf.featureEach(flattenedCountry, function (countryPart) {
-            turf.featureEach(exactCollisionBeam, function (linePart) {
-                const intersections = turf.lineIntersect(linePart, countryPart);
-                if (intersections.features.length > 0) isHit = true;
-                
-                const startPoint = turf.point(linePart.geometry.coordinates[0]);
-                if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
-            });
+/* =======================================
+   LEADERBOARD Y PUNTUACIONES (VERSUS / ONLINE)
+   ======================================= */
+function saveScores(type) {
+  const key = type === 'local' ? "dondeQueda_scores_local" : "dondeQueda_scores_online";
+  let scores = JSON.parse(localStorage.getItem(key)) || {};
+  
+  state.players.forEach((p) => {
+    let nameToSave = p.name.trim();
+    if (nameToSave === "") return;
+
+    let existingKey = Object.keys(scores).find(
+      (k) => k.toLowerCase() === nameToSave.toLowerCase(),
+    );
+    let keyToUse = existingKey || nameToSave;
+
+    // Solo guardamos la puntuación (si es mejor)
+    if (!scores[keyToUse] || p.score > scores[keyToUse]) {
+      scores[keyToUse] = p.score;
+    }
+  });
+  localStorage.setItem(key, JSON.stringify(scores));
+}
+
+function renderLeaderboard(isEndGame = false) {
+  UI.leaderboardLocal.innerHTML = "";
+  UI.leaderboardOnline.innerHTML = "";
+
+  // Ocultamos/mostramos las columnas y títulos
+  if (!isEndGame) {
+      UI.leaderboardWinnerTitle.style.display = "none";
+      UI.leaderboardColLocal.style.display = "flex";
+      UI.leaderboardColOnline.style.display = "flex";
+      UI.leaderboardGeneralTitle.style.marginTop = "0";
+  } else {
+      if (state.gameMode === 'local') {
+          UI.leaderboardColLocal.style.display = "flex";
+          UI.leaderboardColOnline.style.display = "none";
+          UI.leaderboardGeneralTitle.style.marginTop = "10px";
+      } else if (state.gameMode === 'online') {
+          UI.leaderboardColLocal.style.display = "none";
+          UI.leaderboardColOnline.style.display = "flex";
+          UI.leaderboardGeneralTitle.style.marginTop = "0";
+      }
+  }
+
+  const renderList = (key, listEl) => {
+      let scores = JSON.parse(localStorage.getItem(key)) || {};
+      let sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      let lowestHighlightedNode = null;
+
+      sortedScores.forEach(([name, score], index) => {
+          let li = document.createElement("li");
+          let rightContent = `<span>${score}</span>`;
+
+          // Si acabamos de terminar una partida y este es uno de los jugadores
+          if (isEndGame && state.players.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+              let player = state.players.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+              
+              if ((key === "dondeQueda_scores_local" && state.gameMode === 'local') || 
+                  (key === "dondeQueda_scores_online" && state.gameMode === 'online')) {
+                  
+                  li.classList.add("highlight-gold");
+                  lowestHighlightedNode = li;
+
+                  // Inyectamos las estadísticas de la partida actual directamente en la tabla (Solo visual, no guardado)
+                  if (key === "dondeQueda_scores_local" && state.gameMode === 'local') {
+                      let rounds = Math.floor(state.turn / 2); 
+                      let accuracy = Math.round((player.hits / rounds) * 100) || 0;
+                      rightContent = `<span style="text-align: right;">${score} pts<br><span style="font-size: 0.85rem; color: #94a3b8; font-weight: normal; line-height: 1.4; display: inline-block; margin-top: 2px;">Esta partida: ${player.hits}/${rounds} aciertos (${accuracy}%)</span></span>`;
+                  }
+              }
+          }
+          
+          if (rightContent === `<span>${score}</span>`) {
+              rightContent = `<span>${score} pts</span>`;
+          }
+
+          li.innerHTML = `<span>${index + 1}. ${name}</span>${rightContent}`;
+          listEl.appendChild(li);
+      });
+      return lowestHighlightedNode;
+  };
+
+  const nodeLocal = renderList("dondeQueda_scores_local", UI.leaderboardLocal);
+  const nodeOnline = renderList("dondeQueda_scores_online", UI.leaderboardOnline);
+
+  if (isEndGame) {
+    UI.endgameActions.style.display = "block";
+    UI.standardActions.style.display = "none";
+
+    let targetNode = state.gameMode === 'local' ? nodeLocal : nodeOnline;
+    if (targetNode) {
+      setTimeout(() => {
+        targetNode.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
         });
+      }, 200);
     }
+  } else {
+    UI.endgameActions.style.display = "none";
+    UI.standardActions.style.display = "block";
+  }
+}
 
-    if (isHit) { 
-        UI.resultTitle.textContent = "ACERTASTE ✅"; 
-        UI.resultTitle.style.color = "#4ade80"; 
-    } else { 
-        UI.resultTitle.textContent = "FALLASTE ❌"; 
-        UI.resultTitle.style.color = "#f87171"; 
-    }
+UI.btnClearScores.addEventListener("click", () => {
+  if (
+    confirm(
+      "¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.",
+    )
+  ) {
+    localStorage.removeItem("dondeQueda_scores_local");
+    localStorage.removeItem("dondeQueda_scores_online");
+    renderLeaderboard(false);
+  }
+});
 
-    setTimeout(() => { drawResultMap(exactCollisionBeam, isHit); }, 100);
+UI.btnVersusRestart.addEventListener("click", () => {
+  state.turn = 1;
+  state.currentPlayerIdx = 0;
+  state.players.forEach(p => {
+      p.score = 0;
+      p.hits = 0;
+  });
+  startNewRound();
 });
 
 /* =======================================
    MATEMÁTICAS Y COLISIONES
    ======================================= */
 function buildBeamString(maxLength, step, wrapMeridian = false) {
-    const pts = [];
-    for(let d = 0; d <= maxLength; d += step) {
-        const p = turf.rhumbDestination(state.userLocation, d, state.currentHeading, {units: 'kilometers'});
-        let lng = p.geometry.coordinates[0];
-        let lat = p.geometry.coordinates[1];
-        
-        if (isNaN(lng) || isNaN(lat)) break;
-        if (lat > 89.5) { pts.push([lng, 89.5]); break; }
-        if (lat < -89.5) { pts.push([lng, -89.5]); break; }
+  const pts = [];
+  for (let d = 0; d <= maxLength; d += step) {
+    const p = turf.rhumbDestination(
+      state.userLocation,
+      d,
+      state.currentHeading,
+      { units: "kilometers" },
+    );
+    let lng = p.geometry.coordinates[0];
+    let lat = p.geometry.coordinates[1];
 
-        if (wrapMeridian) {
-            while (lng > 180) lng -= 360;
-            while (lng < -180) lng += 360;
-        }
-        pts.push([lng, lat]);
+    if (isNaN(lng) || isNaN(lat)) break;
+    if (lat > 89.5) {
+      pts.push([lng, 89.5]);
+      break;
     }
-    return pts;
+    if (lat < -89.5) {
+      pts.push([lng, -89.5]);
+      break;
+    }
+
+    if (wrapMeridian) {
+      while (lng > 180) lng -= 360;
+      while (lng < -180) lng += 360;
+    }
+    pts.push([lng, lat]);
+  }
+  return pts;
 }
 
 function breakLinesOnMeridian(linePoints) {
-    const lines = [];
-    let currentLine = [];
-    for (let pt of linePoints) {
-        if (currentLine.length > 0) {
-            if (Math.abs(pt[0] - currentLine[currentLine.length - 1][0]) > 180) {
-                if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-                currentLine = [];
-            }
-        }
-        currentLine.push(pt);
+  const lines = [];
+  let currentLine = [];
+  for (let pt of linePoints) {
+    if (currentLine.length > 0) {
+      if (Math.abs(pt[0] - currentLine[currentLine.length - 1][0]) > 180) {
+        if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
+        currentLine = [];
+      }
     }
-    if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-    return lines;
+    currentLine.push(pt);
+  }
+  if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
+  return lines;
 }
 
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
    ======================================= */
-function drawResultMap(beamGeometry, isHit) {
-    if (!state.resultMap) { 
-        state.resultMap = L.map('map-container', { zoomControl: false, attributionControl: false }); 
-        state.resultMapLayers = L.featureGroup().addTo(state.resultMap); 
-    }
-
-    state.resultMap.invalidateSize();
-    state.resultMapLayers.clearLayers();
-    
-    // Si la anterior vez se cargaron tiles o polígonos base, limpiamos todas las capas subyacentes.
-    state.resultMap.eachLayer(layer => {
-        if (layer !== state.resultMapLayers) state.resultMap.removeLayer(layer);
+function drawResultMap(beamGeometry, isHit, errorLine = null) {
+  if (!state.resultMap) {
+    state.resultMap = L.map("map-container", {
+      zoomControl: false,
+      attributionControl: false,
     });
+    state.resultMapLayers = L.featureGroup().addTo(state.resultMap);
+  }
 
-    if (state.mode === 'spain') {
-        L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.resultMap);
+  state.resultMap.invalidateSize();
+  state.resultMapLayers.clearLayers();
 
-        L.geoJSON(state.targetData.polygonGeometry, {
-            style: { fillColor: isHit ? '#22c55e' : '#ef4444', weight: 2, color: '#ffffff', fillOpacity: 0.8 }
-        }).addTo(state.resultMapLayers);
+  state.resultMap.eachLayer((layer) => {
+    if (layer !== state.resultMapLayers) state.resultMap.removeLayer(layer);
+  });
 
-        L.circleMarker([state.targetData.lat, state.targetData.lng], {
-            radius: 4, fillColor: '#000000', color: '#000000', weight: 1, fillOpacity: 1
-        }).addTo(state.resultMapLayers);
+  L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(
+    state.resultMap,
+  );
 
-        const bounds = L.latLngBounds([
-            [state.userLocation[1], state.userLocation[0]],
-            [state.targetData.lat, state.targetData.lng]
-        ]);
-        state.resultMap.fitBounds(bounds, { padding: [30, 30] });
+  L.geoJSON(state.targetData, {
+    style: {
+      fillColor: isHit ? "#22c55e" : "#ef4444",
+      weight: 2,
+      color: "#ffffff",
+      fillOpacity: 0.8,
+    },
+  }).addTo(state.resultMapLayers);
 
-    } else {
-        L.geoJSON(state.countriesGeoJSON, {
-            style: { fillColor: '#1e293b', weight: 1, color: '#334155', fillOpacity: 0.5 }
-        }).addTo(state.resultMap);
+  state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
 
-        L.geoJSON(state.targetData, {
-            style: { fillColor: isHit ? '#22c55e' : '#ef4444', weight: 2, color: '#ffffff', fillOpacity: 0.8 }
-        }).addTo(state.resultMapLayers);
+  L.geoJSON(beamGeometry, {
+    style: { color: isHit ? "#4ade80" : "#f87171", weight: 5, opacity: 0.8 },
+  }).addTo(state.resultMapLayers);
 
-        state.resultMap.setView([state.userLocation[1], state.userLocation[0]], 2);
-    }
-
-    // Dibujar el rayo y al usuario (común en ambos)
-    L.geoJSON(beamGeometry, {
-        style: { color: isHit ? '#facc15' : '#64748b', weight: 5, opacity: 0.8 }
+  if (errorLine) {
+    L.geoJSON(errorLine, {
+      style: { color: "#facc15", weight: 3, dashArray: "6, 6", opacity: 0.9 },
     }).addTo(state.resultMapLayers);
+  }
 
-    L.circleMarker([state.userLocation[1], state.userLocation[0]], {
-        radius: state.mode === 'spain' ? 6 : 5, 
-        fillColor: '#3b82f6', color: '#ffffff', weight: 2, fillOpacity: 1
-    }).addTo(state.resultMapLayers);
-
-    setupOffscreenIndicator();
-}
-
-/* =======================================
-   INDICADOR FUERA DE PANTALLA
-   ======================================= */
-function setupOffscreenIndicator() {
-    state.resultMap.off('move'); 
-    state.resultMap.on('move', () => updateIndicatorPosition());
-    updateIndicatorPosition(); 
-}
-
-function updateIndicatorPosition() {
-    const bounds = state.resultMap.getBounds();
-    if (bounds.contains(state.targetCenterLatLng)) { 
-        UI.indicator.style.display = 'none'; 
-        return; 
-    }
-    
-    UI.indicator.style.display = 'flex';
-    
-    const centerPixel = state.resultMap.latLngToContainerPoint(state.resultMap.getCenter());
-    const targetPixel = state.resultMap.latLngToContainerPoint(state.targetCenterLatLng);
-    const angleRad = Math.atan2(targetPixel.y - centerPixel.y, targetPixel.x - centerPixel.x);
-    UI.indicator.style.transform = `rotate(${angleRad * (180 / Math.PI)}deg)`;
-
-    const rect = document.getElementById('map-wrapper').getBoundingClientRect();
-    const radiusX = (rect.width / 2) - 25, radiusY = (rect.height / 2) - 25;
-    let x = Math.cos(angleRad) * radiusX, y = Math.sin(angleRad) * radiusY;
-
-    if (Math.abs(x) > radiusX) { x = Math.sign(x) * radiusX; y = x * Math.tan(angleRad); }
-    if (Math.abs(y) > radiusY) { y = Math.sign(y) * radiusY; x = y / Math.tan(angleRad); }
-
-    UI.indicator.style.left = `calc(50% + ${x}px - 22px)`; 
-    UI.indicator.style.top = `calc(50% + ${y}px - 22px)`;
+  L.circleMarker(
+    [state.userLocation[1], state.userLocation[0]],
+    MARKER_STYLE,
+  ).addTo(state.resultMapLayers);
 }

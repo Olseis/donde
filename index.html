@@ -1,72 +1,183 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dónde queda...</title>
-    
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Ribeye+Marrow&display=swap" rel="stylesheet">
-    
+
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
     <!-- BOTÓN DE CRÉDITOS FLOTANTE -->
     <button id="btn-credits-float" aria-label="Créditos">ℹ</button>
 
-    <!-- PANTALLA DE INICIO -->
+    <!-- PANTALLA DE INICIO: MODO DE JUEGO (Desplazamiento bloqueado) -->
     <div id="start-screen" class="screen active">
         <img src="logo.png" alt="Dónde queda..." class="logo">
         <h1>¿Dónde queda... ?</h1>
+
+        <p class="category-title">Un jugador</p>
+        <div class="mode-buttons">
+            <button id="btn-mode-classic" class="btn-mode">
+                <span class="mode-title">Clásico</span>
+            </button>
+            <button id="btn-mode-ranked" class="btn-mode">
+                <span class="mode-title">Ranked</span>
+            </button>
+        </div>
         
-        <p>Selecciona una región para jugar:</p>
-        
+        <p class="category-title">Versus</p>
+        <div class="mode-buttons">
+            <button id="btn-mode-local" class="btn-mode btn-mode-versus">
+                <span class="mode-title">Local</span>
+            </button>
+            <button id="btn-mode-online" class="btn-mode btn-mode-versus">
+                <span class="mode-title">Online</span>
+            </button>
+        </div>
+
+        <div class="secondary-actions">
+            <button id="btn-show-progress" class="btn-secondary btn-small">📈 Mi progreso</button>
+            <button id="btn-show-scores" class="btn-secondary btn-small">🏆 Tabla Ranking</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE SELECCIÓN DE REGIÓN -->
+    <div id="region-screen" class="screen">
+        <h2>Elige una región</h2>
+        <p id="region-subtitle" class="region-subtitle"></p>
+
         <div class="menu-grid" id="menu-container">
-            <button class="btn-menu btn-all" data-region="Todos">Todo el Mundo</button>
+            <button class="btn-menu btn-all" data-region="Todos">🌍 Todo el Mundo</button>
             <button class="btn-menu" data-region="América">América</button>
             <button class="btn-menu" data-region="Europa">Europa</button>
             <button class="btn-menu" data-region="Asia">Asia</button>
             <button class="btn-menu" data-region="África">África</button>
-            <button class="btn-menu" data-region="Oceanía">Oceanía</button>
-            <button class="btn-menu btn-spain" data-region="España">🇪🇸 España</button> 
+            <button class="btn-menu btn-wide" data-region="Oceanía">Oceanía</button>
         </div>
-        
+
         <p id="start-loading-text" class="loading-text">Cargando mapa mundial...</p>
+
+        <button id="btn-back-region" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE NOMBRES VERSUS / ONLINE -->
+    <div id="names-screen" class="screen">
+        <h2 id="names-title" style="color: #E2A342;">Nombres de los Jugadores</h2>
+        <input type="text" id="input-p1" placeholder="Jugador 1" class="name-input" autocomplete="off">
+        <input type="text" id="input-p2" placeholder="Jugador 2" class="name-input" autocomplete="off">
+        <button id="btn-confirm-names">Continuar</button>
+        <button id="btn-back-names" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE PUNTUACIONES (LEADERBOARD) -->
+    <div id="leaderboard-screen" class="screen scrollable">
+        <h1 id="leaderboard-winner-title" style="display: none; margin-bottom: 10px;">¡Ha ganado Nombre!</h1>
+        <h2 id="leaderboard-general-title" style="color: #E2A342; font-family: 'Ribeye Marrow', cursive; margin-top: 0;">Tabla Ranking</h2>
+
+        <div class="leaderboard-tables">
+            <div id="col-local" class="leaderboard-col">
+                <h3>Local</h3>
+                <ul id="leaderboard-list-local" class="leaderboard-list"></ul>
+            </div>
+            <div id="col-online" class="leaderboard-col">
+                <h3>Online</h3>
+                <ul id="leaderboard-list-online" class="leaderboard-list"></ul>
+            </div>
+        </div>
+
+        <!-- Botones al terminar partida Versus/Online -->
+        <div id="endgame-actions" style="display: none; width: 100%; margin-top: 20px;">
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <button id="btn-versus-restart">Reiniciar</button>
+                <button id="btn-versus-new">Nueva partida</button>
+                <button id="btn-versus-exit" class="btn-secondary">Volver</button>
+            </div>
+        </div>
+
+        <!-- Botones estándar del menú -->
+        <div id="standard-actions" style="width: 100%; margin-top: 20px;">
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <button id="btn-back-leaderboard" class="btn-secondary">Volver</button>
+                <button id="btn-clear-scores" class="btn-danger-small">Borrar Datos</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE PROGRESO (UN JUGADOR) -->
+    <div id="progress-screen" class="screen scrollable">
+        <h2>Mi progreso</h2>
+
+        <div class="level-card">
+            <div class="level-header">
+                <span id="progress-level-name"></span>
+            </div>
+            <div class="level-bar">
+                <div id="progress-level-fill" class="level-fill"></div>
+            </div>
+            <p id="progress-level-text" class="level-text"></p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat"><span id="stat-games" class="stat-value">0</span><span class="stat-label">Partidas</span>
+            </div>
+            <div class="stat"><span id="stat-hits" class="stat-value">0</span><span class="stat-label">Aciertos</span>
+            </div>
+            <div class="stat"><span id="stat-accuracy" class="stat-value">0%</span><span
+                    class="stat-label">Precisión</span></div>
+        </div>
+
+        <h3 class="records-title">Récords por región (Ranked)</h3>
+        <ul id="records-list" class="records-list"></ul>
+
+        <button id="btn-back-progress" class="btn-secondary">Volver</button>
+        <button id="btn-reset-progress" class="btn-danger-small">Borrar progreso</button>
     </div>
 
     <!-- PANTALLA DE CRÉDITOS -->
     <div id="credits-screen" class="screen">
-        <img src="OlseisLogoMonocromatico.png" alt="Olseis" class="logo">
+        <img src="OlseisLogoMonocromatico.png" alt="Olseis Games" class="logo">
         <div class="credits-content">
             <h2 style="color: #fff; font-family: 'Ribeye Marrow', cursive;">Créditos</h2>
-            <p>Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.</p>
-            <p>Este proyecto utiliza <a href="https://leafletjs.com/" target="_blank">Leaflet</a>, 
-            <a href="https://turfjs.org/" target="_blank">Turf.js</a>, Mapas por Google Maps 
-            y <a href="https://github.com/johan/world.geo.json" target="_blank">World GeoJSON</a>.</p>
+            <h3>Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.</h3>
+            <p>En colaboración con <a href="https://github.com/RaoulLabrunie" target="_blank">Raúl Labrunie</a>.</p><br>
+            <p>Este proyecto utiliza <a href="https://leafletjs.com/" target="_blank">Leaflet</a>,
+                <a href="https://turfjs.org/" target="_blank">Turf.js</a>, Mapas por Google Maps
+                y <a href="https://github.com/johan/world.geo.json" target="_blank">World GeoJSON</a>.
+            </p>
         </div>
         <button id="btn-back-credits" class="btn-secondary">Volver</button>
-    </div>
+    </div>  
 
     <!-- PANTALLA DE UBICACIÓN -->
     <div id="location-screen" class="screen">
         <h2>Tu punto de partida</h2>
-        
-        <button id="btn-saved-location" class="btn-action btn-orange" style="display: none;">🔄 Usar última ubicación</button>
+
         <button id="btn-gps" class="btn-action btn-green">📍 Usar ubicación GPS</button>
-        
+
         <p>O marca tu posición en el mapa:</p>
         <div id="select-map-container"></div>
-        
+
         <button id="btn-confirm-location" disabled>Confirmar Mapa</button>
+        <button id="btn-back-loc" class="btn-secondary" style="margin-top: 15px;">Volver</button>
         <p id="location-loading-text" class="loading-text"></p>
     </div>
 
     <!-- PANTALLA DE JUEGO (BRÚJULA) -->
     <div id="game-screen" class="screen">
+        <h2 id="current-player-display"
+            style="display: none; color: #E2A342; font-family: 'Ribeye Marrow', cursive; margin: 0 0 15px 0; font-size: 2.2rem;">
+        </h2>
+        <p id="round-info" class="round-info"></p>
         <div class="game-header">
             <h3>¿Dónde queda</h3>
             <div class="target-container">
@@ -74,32 +185,81 @@
                 <h3>?</h3>
             </div>
         </div>
-        
+
         <div class="compass-container">
             <div class="fixed-arrow">⬆</div>
-            <div id="compass-dial" class="compass-dial"><div class="north-marker">N</div></div>
+            <div id="compass-dial" class="compass-dial">
+                <div class="north-marker">N</div>
+            </div>
             <div id="debug-info">Azimut: Esperando...</div>
         </div>
-        
+
         <button id="btn-confirm">Comprobar</button>
     </div>
 
     <!-- PANTALLA DE RESULTADO -->
     <div id="result-screen" class="screen">
         <h1 id="result-title">Analizando...</h1>
+        <h2 id="turn-points-display"
+            style="display: none; color: #facc15; margin: 0 0 10px 0; font-family: 'Ribeye Marrow', cursive;"></h2>
+        <p id="result-error-details" class="error-details" style="display: none;"></p>
         <div id="map-wrapper">
             <div id="map-container"></div>
-            <div id="offscreen-indicator">➔</div>
         </div>
         <button id="btn-restart">Siguiente Destino</button>
-        <button id="btn-change-region" class="btn-secondary">Cambiar Región</button>
+        <button id="btn-change-region" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- PANTALLA DE MITAD DE PARTIDA (LOCAL) -->
+    <div id="midgame-screen" class="screen">
+        <h1 id="midgame-title" style="margin-bottom: 5px;">¡Jugador va ganando!</h1>
+        <p id="midgame-diff" style="color: #94a3b8; font-size: 1.1rem; margin-top: 0; margin-bottom: 20px;">Diferencia: 0 pts</p>
+        
+        <div style="width: 100%; max-width: 350px; margin-bottom: 30px;">
+            <ul id="midgame-list" class="leaderboard-list">
+                <!-- Se rellena con JS simulando la tabla local -->
+            </ul>
+        </div>
+
+        <button id="btn-midgame-continue">Continuar</button>
+        <button id="btn-midgame-end" class="btn-secondary">Terminar</button>
+    </div>
+
+    <!-- PANTALLA DE RESUMEN DE PARTIDA (UN JUGADOR) -->
+    <div id="summary-screen" class="screen scrollable">
+        <h1>¡Partida terminada!</h1>
+        <p id="summary-region" class="summary-region"></p>
+
+        <div id="summary-score" class="summary-score">0</div>
+        <p class="summary-label">puntos</p>
+        <p id="summary-hits" class="summary-hits"></p>
+        <p id="summary-record" class="summary-record"></p>
+
+        <div class="level-card">
+            <div class="level-header">
+                <span id="summary-level-name"></span>
+                <span id="summary-xp-gain" class="xp-gain"></span>
+            </div>
+            <div class="level-bar">
+                <div id="summary-level-fill" class="level-fill"></div>
+            </div>
+            <p id="summary-level-text" class="level-text"></p>
+        </div>
+        <p id="summary-level-up" class="level-up" style="display: none;"></p>
+
+        <div class="summary-actions">
+            <button id="btn-summary-again">Jugar otra vez</button>
+            <button id="btn-summary-region" class="btn-secondary">Cambiar región</button>
+            <button id="btn-summary-menu" class="btn-secondary">Menú principal</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-    
+
     <!-- Archivos Modulares -->
     <script src="data.js"></script>
     <script src="app.js"></script>
 </body>
+
 </html>
