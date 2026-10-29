@@ -1,0 +1,69 @@
+# ===== Node / npm =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== Android: archivos locales de cada ordenador =====
+android/local.properties
+android/.gradle/
+android/.idea/
+android/*.iml
+android/app/*.iml
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+
+# ===== Android: compilaciones (se regeneran) =====
+android/build/
+android/app/build/
+android/app/release/
+android/app/debug/
+*.apk
+*.aab
+
+# ===== Android: copias generadas por "npx cap sync" =====
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/capacitor-cordova-android-plugins/
+
+# ===== iOS: dependencias y compilaciones =====
+ios/App/Pods/
+ios/DerivedData/
+ios/build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ===== iOS: copias generadas por "npx cap sync" =====
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/capacitor-cordova-ios-plugins/
+
+# ===== Xcode: archivos de usuario =====
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# ===== Claves y certificados (NUNCA subirlos) =====
+*.jks
+*.keystore
+keystore.properties
+*.p12
+*.cer
+*.mobileprovision
+
+# ===== Sistema operativo =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Editores =====
+.vscode/
+.idea/
+
+# ===== Variables de entorno =====
+.env
+.env.*
