@@ -1,0 +1,8 @@
+{
+	"appId": "com.dondequeda.dondequeda",
+	"appName": "Donde Queda",
+	"webDir": "www",
+	"packageClassList": [
+		"AppPlugin"
+	]
+}
