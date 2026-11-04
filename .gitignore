@@ -1,0 +1,4 @@
+# Servidor: dependencias y base de datos (la BD de verdad vive en /var/lib/donde)
+server/node_modules/
+server/*.db
+server/*.db-*

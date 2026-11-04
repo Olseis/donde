@@ -1,0 +1,24 @@
+# Servicio del servidor de partidas. Se instala en /etc/systemd/system/donde.service
+[Unit]
+Description=Servidor de ¿Dónde queda...? (partidas online + base de datos)
+After=network.target
+
+[Service]
+Type=simple
+User=donde
+Group=donde
+WorkingDirectory=__REPO__/server
+EnvironmentFile=/etc/donde.env
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=3
+
+# Solo puede escribir en su carpeta de datos
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/donde
+
+[Install]
+WantedBy=multi-user.target

@@ -649,3 +649,71 @@ input, textarea {
     -ms-user-select: auto;
     user-select: auto;
 }
+
+/* =======================================
+   MODO ONLINE
+   ======================================= */
+.online-or {
+    font-family: Arial, sans-serif;
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin: 20px 0 0 0;
+}
+
+.room-code-input {
+    font-family: 'Limelight', cursive;
+    font-size: 1.8rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    max-width: 220px;
+}
+
+.online-status {
+    font-family: Arial, sans-serif;
+    color: #94a3b8;
+    font-size: 0.95rem;
+    min-height: 1.2em;
+    margin: 10px 0;
+}
+
+.room-code {
+    font-size: 3.2rem;
+    letter-spacing: 0.25em;
+    color: #facc15;
+    line-height: 1.1;
+    padding-left: 0.25em; /* compensa el letter-spacing para que quede centrado */
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.room-players {
+    list-style: none;
+    max-width: 350px;
+    margin-top: 15px;
+}
+
+.room-player-status {
+    font-size: 0.85rem;
+    color: #94a3b8;
+}
+
+.highlight-gold .room-player-status {
+    color: #E2A342;
+}
+
+.online-round-list {
+    list-style: none;
+    max-width: 400px;
+    max-height: 22vh;
+    margin: 0;
+}
+
+.online-round-list li {
+    padding: 8px 10px;
+    font-size: 1rem;
+}
+
+/* En online el mapa del resultado es más bajo para que quepa la tabla de la ronda */
+.online-results #map-wrapper {
+    height: 32vh;
+}

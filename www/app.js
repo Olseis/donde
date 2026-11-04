@@ -98,6 +98,8 @@ const screens = {
   result: document.getElementById("result-screen"),
   midgame: document.getElementById("midgame-screen"),
   summary: document.getElementById("summary-screen"),
+  online: document.getElementById("online-screen"),
+  waiting: document.getElementById("waiting-screen"),
 };
 
 const UI = {
@@ -356,6 +358,7 @@ function showScreen(screenName) {
 }
 
 function returnToMenu() {
+  if (state.gameMode === 'online' && typeof Online !== "undefined") Online.disconnect();
   state.gameMode = null;
   showScreen("start");
 }
@@ -456,8 +459,14 @@ if(UI.btnConfirmNames) UI.btnConfirmNames.addEventListener("click", () => {
       }
       state.players = [{ name: p1, score: 0, hits: 0 }, { name: p2, score: 0, hits: 0 }];
   } else if (state.gameMode === 'online') {
-      localStorage.setItem("dondeQueda_onlineName", p1);
-      state.players = [{ name: p1, score: 0, hits: 0 }];
+      if (!/^[\p{L}\p{N} _.\-]{1,20}$/u.test(p1)) {
+          alert("Escribe un nombre de 1 a 20 letras o números.");
+          if(UI.inputP1) UI.inputP1.focus();
+          return;
+      }
+      state.currentPlayerIdx = 0; state.turn = 1;
+      openOnlineLobby(p1); // online.js: crear sala o unirse con código
+      return;
   }
   state.currentPlayerIdx = 0; state.turn = 1;
   goToRegionSelect();
@@ -465,7 +474,8 @@ if(UI.btnConfirmNames) UI.btnConfirmNames.addEventListener("click", () => {
 
 if(UI.btnBackNames) UI.btnBackNames.addEventListener("click", returnToMenu);
 if(UI.btnBackRegion) UI.btnBackRegion.addEventListener("click", () => {
-  if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names"); 
+  if (state.gameMode === 'online') showScreen("online");
+  else if (state.gameMode === 'local') showScreen("names"); 
   else returnToMenu();
 });
 
@@ -476,7 +486,17 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
 
     state.continent = region;
 
-    if (state.gameMode === 'local' || state.gameMode === 'online') {
+    // Online: la sala se crea en el servidor y él nos lleva a elegir ubicación (online.js)
+    if (state.gameMode === 'online') {
+      if(UI.regionSubtitle) UI.regionSubtitle.textContent = "Creando sala...";
+      Online.createRoom(region).catch(() => {
+        alert("No se pudo conectar con el servidor.");
+        showScreen("online");
+      });
+      return;
+    }
+
+    if (state.gameMode === 'local') {
       state.players.forEach((p) => { p.score = 0; p.hits = 0; });
       state.currentPlayerIdx = 0; state.turn = 1;
     } else {
@@ -521,7 +541,10 @@ if(UI.btnVersusNew) UI.btnVersusNew.addEventListener("click", () => {
     if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names");
 });
 
-if(UI.btnBackLoc) UI.btnBackLoc.addEventListener("click", goToRegionSelect);
+if(UI.btnBackLoc) UI.btnBackLoc.addEventListener("click", () => {
+  if (state.gameMode === 'online') { Online.leaveRoom(); showScreen("online"); }
+  else goToRegionSelect();
+});
 
 if(UI.btnChangeRegion) UI.btnChangeRegion.addEventListener("click", async () => {
   if (state.gameMode === 'classic') { goToRegionSelect(); return; }
@@ -580,14 +603,6 @@ function endLocalGame() {
         UI.leaderboardWinnerTitle.style.display = "block";
     }
     saveScores('local'); renderLeaderboard(true); showScreen("leaderboard");
-}
-
-function endOnlineGame() {
-    if(UI.leaderboardWinnerTitle) {
-        UI.leaderboardWinnerTitle.textContent = `¡Partida Terminada!`;
-        UI.leaderboardWinnerTitle.style.display = "block";
-    }
-    saveScores('online'); renderLeaderboard(true); showScreen("leaderboard");
 }
 
 if(UI.btnSummaryAgain) UI.btnSummaryAgain.addEventListener("click", () => { resetSingleGame(); startNewRound(); });
@@ -678,8 +693,15 @@ async function initializeGameSession(source) {
     }
 
     startCompass();
-    startNewRound();
     if(UI.locLoading) UI.locLoading.style.display = "none";
+
+    // Online: no se empieza todavía; se avisa al servidor y se espera al resto
+    if (state.gameMode === 'online') {
+      Online.sendLocation(state.userLocation);
+      showScreen("waiting");
+      return;
+    }
+    startNewRound();
   } catch (error) {
     console.error("Error al arrancar la brújula o mapa:", error);
     alert("Hubo un problema. Asegúrate de tener permisos de ubicación o recarga la página.");
@@ -759,6 +781,7 @@ function handleOrientation(event) {
    LÓGICA DEL JUEGO
    ======================================= */
 function startNewRound() {
+  if (state.gameMode === 'online') return; // en online las rondas las manda el servidor
   showScreen("game");
   if(UI.resultErrorDetails) UI.resultErrorDetails.style.display = "none";
   if(UI.turnPointsDisplay) UI.turnPointsDisplay.style.display = "none";
@@ -825,107 +848,33 @@ if (btnConfirmGame) {
     btnConfirmGame.addEventListener("click", () => {
       showScreen("result");
 
-      let isHit = false;
-      let exactCollisionBeam = null;
-      let minDistance = Infinity;
-      let errorLine = null;
+      // El cálculo está en shot.js, el mismo archivo que usa el servidor en las partidas online
+      const shot = DondeShot.judgeShot({
+        turf,
+        userLocation: state.userLocation,
+        heading: state.currentHeading,
+        mode: state.mode,
+        target: state.targetData,
+      });
+      const isHit = shot.isHit;
+      if (state.mode === 'spain') state.targetData.polygonGeometry = shot.targetGeometry;
 
-      if (state.mode === 'spain') {
-          let targetPolygon = turf.circle([state.targetData.lng, state.targetData.lat], 20, {units: 'kilometers'});
-          const distanceToTarget = turf.distance(state.userLocation, [state.targetData.lng, state.targetData.lat], {units: 'kilometers'});
-          const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
-          
-          const linePoints = buildBeamString(rayLengthKm, 20);
-          exactCollisionBeam = turf.featureCollection([turf.lineString(linePoints)]);
-          
-          const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
-          if (intersections.features.length > 0) isHit = true;
-          
-          const startPoint = turf.point(linePoints[0]);
-          if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
-          
-          state.targetData.polygonGeometry = targetPolygon;
-
-          if (!isHit) {
-              minDistance = Math.max(0, distanceToTarget - 20);
-              errorLine = turf.lineString([state.userLocation, [state.targetData.lng, state.targetData.lat]]);
-          }
-      } else {
-          const distanceToTarget = turf.distance(
-            state.userLocation,
-            [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat],
-            { units: "kilometers" },
-          );
-          const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
-
-          const linePoints = buildBeamString(rayLengthKm, 100, true);
-          const lines = breakLinesOnMeridian(linePoints);
-          exactCollisionBeam = turf.featureCollection(lines);
-
-          let closestCountryPt = null;
-
-          const flattenedCountry = turf.flatten(state.targetData);
-          turf.featureEach(flattenedCountry, function (countryPart) {
-            turf.featureEach(exactCollisionBeam, function (linePart) {
-              const intersections = turf.lineIntersect(linePart, countryPart);
-              if (intersections.features.length > 0) isHit = true;
-              const startPoint = turf.point(linePart.geometry.coordinates[0]);
-              if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
-            });
-          });
-
-          if (!isHit) {
-              const vertices = turf.explode(state.targetData);
-              const userPt = turf.point(state.userLocation);
-              turf.featureEach(vertices, function (pointFeature) {
-                const dist = turf.distance(userPt, pointFeature, { units: "kilometers" });
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  closestCountryPt = pointFeature;
-                }
-              });
-
-              if (closestCountryPt) {
-                  let pt2 = closestCountryPt.geometry.coordinates;
-                  if (state.userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
-                  else if (pt2[0] - state.userLocation[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
-                  errorLine = turf.lineString([state.userLocation, pt2]);
-              }
-          }
-      }
-
-      const idealBearing = turf.bearing(state.userLocation, [
-        state.targetCenterLatLng.lng,
-        state.targetCenterLatLng.lat,
-      ]);
-      let headingNorm = state.currentHeading % 360;
-      let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
-
-      let errorAngle = Math.abs(headingNorm - bearingNorm);
-      if (errorAngle > 180) errorAngle = 360 - errorAngle;
-
-      let turnPoints = 0;
+      let turnPoints = state.gameMode === 'classic' ? 0 : shot.points;
 
       if(UI.resultTitle) {
           if (isHit) {
             UI.resultTitle.textContent = "ACERTASTE ✅";
             UI.resultTitle.style.color = "#4ade80";
             if(UI.resultErrorDetails) UI.resultErrorDetails.style.display = "none";
-            turnPoints = 100;
           } else {
             UI.resultTitle.textContent = "FALLASTE ❌";
             UI.resultTitle.style.color = "#f87171";
-            if (errorAngle <= 90) turnPoints = Math.round(75 * (1 - errorAngle / 90));
-            else turnPoints = 0;
-
             if(UI.resultErrorDetails) {
-                UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
+                UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${shot.minDistanceKm} km</b>`;
                 UI.resultErrorDetails.style.display = "block";
             }
           }
       }
-
-      if (state.gameMode === 'classic') turnPoints = 0;
 
       if(UI.turnPointsDisplay) {
           if (state.gameMode === 'classic') {
@@ -943,10 +892,8 @@ if (btnConfirmGame) {
         else if (state.turn === 6) UI.btnRestart.textContent = "Ver Marcador";
         else UI.btnRestart.textContent = "Siguiente Turno";
       } else if (state.gameMode === 'online') {
-        state.players[0].score += turnPoints;
-        if (isHit) state.players[0].hits++;
-        if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
-        else UI.btnRestart.textContent = "Siguiente Ronda";
+        // Solo se manda el rumbo: el servidor decide los puntos (online.js)
+        onlineShot(state.currentHeading);
       } else if (state.gameMode === 'ranked') {
         state.single.score += turnPoints;
         if (isHit) state.single.hits++;
@@ -955,7 +902,7 @@ if (btnConfirmGame) {
         if(UI.btnRestart) UI.btnRestart.textContent = "Siguiente ronda";
       }
 
-      setTimeout(() => { drawResultMap(exactCollisionBeam, isHit, errorLine); }, 100);
+      setTimeout(() => { drawResultMap(shot.beam, isHit, shot.errorLine); }, 100);
     });
 }
 
@@ -965,8 +912,7 @@ if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
     else if (state.turn >= 10) endLocalGame();
     else { state.turn++; state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2; startNewRound(); }
   } else if (state.gameMode === 'online') {
-    if (state.turn >= 10) endOnlineGame();
-    else { state.turn++; startNewRound(); }
+    onlineNext();
   } else if (state.gameMode === 'ranked') {
     if (state.single.round >= ROUNDS_PER_GAME) finishSingleGame();
     else { state.single.round++; startNewRound(); }
@@ -1049,13 +995,18 @@ function renderLeaderboard(isEndGame = false) {
   };
 
   const nodeLocal = renderList("dondeQueda_scores_local", UI.leaderboardLocal);
-  const nodeOnline = renderList("dondeQueda_scores_online", UI.leaderboardOnline);
+  // El ranking online sale de la base de datos del servidor (online.js)
+  if (UI.leaderboardOnline) renderOnlineRanking(UI.leaderboardOnline);
+
+  const isOnlineEnd = isEndGame && state.gameMode === 'online';
+  const standingsBox = document.getElementById("match-standings-box");
+  if (standingsBox && !isOnlineEnd) standingsBox.style.display = "none";
+  if (UI.btnVersusRestart) UI.btnVersusRestart.style.display = isOnlineEnd ? "none" : "";
 
   if (isEndGame) {
     if(UI.endgameActions) UI.endgameActions.style.display = "block";
     if(UI.standardActions) UI.standardActions.style.display = "none";
-    let targetNode = state.gameMode === 'local' ? nodeLocal : nodeOnline;
-    if (targetNode) { setTimeout(() => { targetNode.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 200); }
+    if (nodeLocal && state.gameMode === 'local') { setTimeout(() => { nodeLocal.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 200); }
   } else {
     if(UI.endgameActions) UI.endgameActions.style.display = "none";
     if(UI.standardActions) UI.standardActions.style.display = "block";
@@ -1066,7 +1017,6 @@ if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", async () => {
   const confirmed = await customConfirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.");
   if (confirmed) {
     localStorage.removeItem("dondeQueda_scores_local");
-    localStorage.removeItem("dondeQueda_scores_online");
     renderLeaderboard(false);
   }
 });
@@ -1076,39 +1026,6 @@ if(UI.btnVersusRestart) UI.btnVersusRestart.addEventListener("click", () => {
   state.players.forEach(p => { p.score = 0; p.hits = 0; });
   startNewRound();
 });
-
-/* =======================================
-   MATEMÁTICAS Y COLISIONES
-   ======================================= */
-function buildBeamString(maxLength, step, wrapMeridian = false) {
-  const pts = [];
-  for (let d = 0; d <= maxLength; d += step) {
-    const p = turf.rhumbDestination(state.userLocation, d, state.currentHeading, { units: "kilometers" });
-    let lng = p.geometry.coordinates[0];
-    let lat = p.geometry.coordinates[1];
-    if (isNaN(lng) || isNaN(lat)) break;
-    if (lat > 89.5) { pts.push([lng, 89.5]); break; }
-    if (lat < -89.5) { pts.push([lng, -89.5]); break; }
-    if (wrapMeridian) { while (lng > 180) lng -= 360; while (lng < -180) lng += 360; }
-    pts.push([lng, lat]);
-  }
-  return pts;
-}
-
-function breakLinesOnMeridian(linePoints) {
-  const lines = []; let currentLine = [];
-  for (let pt of linePoints) {
-    if (currentLine.length > 0) {
-      if (Math.abs(pt[0] - currentLine[currentLine.length - 1][0]) > 180) {
-        if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-        currentLine = [];
-      }
-    }
-    currentLine.push(pt);
-  }
-  if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-  return lines;
-}
 
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
