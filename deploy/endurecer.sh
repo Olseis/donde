@@ -158,7 +158,9 @@ ok "Apache sin versión a la vista y con X-Real-IP"
 # ----------------------------------------------------------
 paso "5/6 Cortafuegos"
 apt-get install -y -qq ufw >/dev/null
-SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"; SSH_PORT="${SSH_PORT:-22}"
+# sshd -T falla en Ubuntu 24.04 si no existe /run/sshd (SSH arrancado por socket): se crea, y si aun así falla, 22
+mkdir -p /run/sshd
+SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)"; SSH_PORT="${SSH_PORT:-22}"
 # Por si acaso, también el puerto por el que estás conectado ahora mismo (para no quedarte fuera)
 CUR_PORT="$(echo "${SSH_CONNECTION:-}" | awk '{print $4}')"
 [ -n "$CUR_PORT" ] && [ "$CUR_PORT" != "$SSH_PORT" ] && ufw allow "$CUR_PORT/tcp" >/dev/null
