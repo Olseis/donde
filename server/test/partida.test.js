@@ -133,10 +133,14 @@ class Client {
     );
 
     const ranking = await (await fetch(`http://127.0.0.1:${PORT}/api/online/ranking?playerId=${ana.id}`)).json();
-    assert.strictEqual(ranking.ranking.length, 3);
-    assert(ranking.ranking.some((r) => r.you && r.name === "Ana"));
-    assert.strictEqual(ranking.ranking[0].name, first.name, "el ranking va por Elo");
-    assert.strictEqual(ranking.ranking[0].elo, first.eloAfter);
+    // Primera partida: todos siguen en clasificación (1/5) y no tienen tabla todavía
+    assert.strictEqual(ranking.me.label, "Clasificación 1/5");
+    assert.strictEqual(ranking.table, null);
+    for (const p of fin.standings) {
+      assert.strictEqual(p.placement, 1);
+      assert.strictEqual(p.lpDelta, 0);
+      assert.strictEqual(p.rankAfter, "Clasificación 1/5");
+    }
     const health = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json();
     assert(health.ok);
 

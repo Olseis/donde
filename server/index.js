@@ -55,11 +55,13 @@ app.use((req, res, next) => {
 
 app.get("/api/health", (req, res) => res.json({ ok: true, ...rooms.stats() }));
 
-// Ranking de las partidas online: victorias, luego puntos totales
+// Ranking online: la tabla de TU división (Oro II, Plata IV...) y tu rango.
+// Sin playerId, o si aún estás en partidas de clasificación, la tabla viene vacía.
 app.get("/api/online/ranking", (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
   const me = PLAYER_ID_REGEX.test(req.query.playerId || "") ? req.query.playerId : null;
-  res.json({ ranking: store.ranking(limit, me) });
+  if (!me) return res.json({ me: null, table: null, ranking: [] });
+  res.json(store.divisionTable(me, limit));
 });
 
 // Últimas partidas de un jugador

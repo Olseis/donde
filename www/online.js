@@ -311,7 +311,7 @@ function renderWaitingRoom() {
     const name = document.createElement("span");
     name.textContent =
       p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
-      (p.elo ? ` · ${p.elo}` : "");
+      (p.rank ? ` · ${shortRank(p.rank)}` : "");
     const status = document.createElement("span");
     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
     status.className = "room-player-status";
@@ -497,6 +497,17 @@ function showOnlineFinal() {
   Online.disconnect();
 }
 
+// "Oro II · 45 LP" → "Oro II" (en la sala de espera no hace falta el LP)
+function shortRank(label) {
+  return String(label).split(" · ")[0];
+}
+
+const RANK_CHANGE_TEXT = {
+  promoted: (r) => `⬆️ ¡Subes a ${shortRank(r)}!`,
+  demoted: (r) => `⬇️ Bajas a ${shortRank(r)}`,
+  placed: (r) => `🎖️ Clasificación terminada: ${shortRank(r)}`,
+};
+
 function renderMatchStandings(standings) {
   const list = document.getElementById("match-standings");
   if (!list) return;
@@ -506,48 +517,72 @@ function renderMatchStandings(standings) {
     const left = document.createElement("span");
     left.textContent = `${s.position}. ${s.name}`;
     const right = document.createElement("span");
-    // Puntos de la partida y cómo ha cambiado su Elo
-    const d = s.eloDelta;
-    right.textContent = d === undefined
-      ? `${s.score} pts`
-      : `${s.score} pts · Elo ${s.eloAfter} (${d >= 0 ? "+" : ""}${d})`;
+    // Puntos de la partida y cómo cambia su rango: +18 LP, o la clasificación 3/5
+    let rank = "";
+    if (s.placement) rank = ` · Clasif. ${s.placement}/5`;
+    else if (s.rankChange === "placed") rank = ` · ${shortRank(s.rankAfter)}`;
+    else if (s.lpDelta !== undefined) rank = ` · ${s.lpDelta >= 0 ? "+" : ""}${s.lpDelta} LP`;
+    right.textContent = `${s.score} pts${rank}`;
     li.append(left, right);
     if (s.id === getPlayerId()) li.classList.add("highlight-gold");
     list.appendChild(li);
   });
+
+  // Tu rango después de la partida, y si has subido o bajado
+  const me = standings.find((s) => s.id === getPlayerId());
+  const box = document.getElementById("match-rank");
+  if (box) {
+    box.textContent = "";
+    if (me && me.rankAfter) {
+      const line = document.createElement("div");
+      line.className = "match-rank-now";
+      line.textContent = me.rankAfter;
+      box.appendChild(line);
+      const change = RANK_CHANGE_TEXT[me.rankChange];
+      if (change) {
+        const note = document.createElement("div");
+        note.className = `match-rank-change ${me.rankChange}`;
+        note.textContent = change(me.rankAfter);
+        box.appendChild(note);
+      }
+    }
+  }
   document.getElementById("match-standings-box").style.display = standings.length ? "" : "none";
 }
 
-/* ---------- Ranking online (desde la base de datos del servidor) ---------- */
+/* ---------- Ranking online: la tabla de TU división ---------- */
 async function renderOnlineRanking(listEl) {
+  const title = document.getElementById("online-table-title");
   listEl.innerHTML = "";
-  const loading = document.createElement("li");
-  loading.textContent = "Cargando…";
-  listEl.appendChild(loading);
+  const addLine = (text) => {
+    const li = document.createElement("li");
+    li.textContent = text;
+    listEl.appendChild(li);
+  };
+  addLine("Cargando…");
   try {
     const res = await fetch(`${ONLINE_BASE}/api/online/ranking?limit=50&playerId=${encodeURIComponent(getPlayerId())}`);
-    const { ranking } = await res.json();
+    const { me, table, ranking } = await res.json();
     listEl.innerHTML = "";
-    if (!ranking.length) {
-      const li = document.createElement("li");
-      li.textContent = "Aún no hay partidas online.";
-      listEl.appendChild(li);
+    if (title) title.textContent = table ? `Online · ${table.name}` : "Online";
+
+    if (!me || me.tier === "unranked") {
+      const played = me && me.placement ? me.placement.played : 0;
+      addLine(`Juega ${5 - played} partida${5 - played === 1 ? "" : "s"} online más para tener rango (${played}/5).`);
       return;
     }
-    ranking.forEach((r, i) => {
+    ranking.forEach((r) => {
       const li = document.createElement("li");
       const left = document.createElement("span");
-      left.textContent = `${i + 1}. ${r.name}${r.you ? " (tú)" : ""}`;
+      left.textContent = `${r.position}. ${r.name}${r.you ? " (tú)" : ""}`;
       const right = document.createElement("span");
-      right.textContent = `${r.elo} Elo · ${r.wins} 🏆 · ${r.games} part.`;
+      right.textContent = `${r.lp} LP · ${r.wins} 🏆`;
       li.append(left, right); // textContent: un nombre nunca se interpreta como HTML
       if (r.you) li.classList.add("highlight-gold");
       listEl.appendChild(li);
     });
   } catch {
     listEl.innerHTML = "";
-    const li = document.createElement("li");
-    li.textContent = "No se pudo cargar el ranking online.";
-    listEl.appendChild(li);
+    addLine("No se pudo cargar el ranking online.");
   }
 }

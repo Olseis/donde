@@ -20,7 +20,7 @@ const store = require("./db");
 const CFG = {
   ROUNDS: 10,
   MIN_PLAYERS: 2,
-  MAX_PLAYERS: 6,
+  MAX_PLAYERS: 10,
   SHOT_TIMEOUT_MS: 60_000, // tiempo para apuntar en cada ronda
   NEXT_TIMEOUT_MS: 30_000, // tiempo viendo resultados antes de pasar solo
   RECONNECT_GRACE_MS: 120_000, // si se va todo el mundo, la sala aguanta esto
@@ -66,7 +66,7 @@ function publicRoom(room) {
       connected: !!p.ws,
       score: p.score,
       hits: p.hits,
-      elo: p.elo,
+      rank: p.rank,
     })),
   };
 }
@@ -138,7 +138,7 @@ function addPlayer(room, player) {
 
   const p = {
     id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
-    elo: store.playerElo(player.id).elo, // se enseña en la sala de espera
+    rank: store.rankOf(player.id).label, // se enseña en la sala de espera
   };
   room.players.set(p.id, p);
   player.ws.roomCode = room.code;
@@ -364,11 +364,22 @@ function finish(room) {
   room.status = "finished";
   room.phase = null;
   const final = standings(room);
-  // Se guarda el resultado y se aplica el Elo; cada jugador recibe su Elo antes y después
-  const elo = store.finishMatch(room.matchId, "finished", final);
+  // Se guarda el resultado y se aplican MMR y LP. Cada jugador recibe su LP y su rango
+  // antes y después (el MMR va también, pero el juego no lo enseña: es el número oculto)
+  const res = store.finishMatch(room.matchId, "finished", final);
   for (const s of final) {
-    const e = elo[s.id];
-    if (e) Object.assign(s, { eloBefore: e.before, eloAfter: e.after, eloDelta: e.delta });
+    const r = res[s.id];
+    if (!r) continue;
+    Object.assign(s, {
+      lpDelta: r.lpDelta,
+      rankBefore: r.before,
+      rankAfter: r.after,
+      rankChange: r.change,
+      placement: r.ladderAfter === null ? r.gamesPlayed : null,
+      eloBefore: r.mmrBefore,
+      eloAfter: r.mmrAfter,
+      eloDelta: r.mmrAfter - r.mmrBefore,
+    });
   }
   broadcast(room, { t: "finished", matchId: room.matchId, standings: final });
   // La sala se borra al rato; los resultados ya están en la base de datos

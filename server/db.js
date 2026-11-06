@@ -12,16 +12,19 @@
    - rounds         el destino de cada ronda
    - shots          cada disparo: rumbo, ubicación y lo que decidió el servidor
 
-   Elo: players.elo / players.elo_games guardan el Elo actual, y
-   match_players.elo_before / elo_after cuánto tenía cada uno antes y
-   después de cada partida (para el historial).
+   Clasificatoria (ver ranked.js):
+   - players.elo / elo_games: MMR oculto y partidas jugadas
+   - players.ladder: rango visible como un solo número (NULL = en clasificación)
+   - match_players.elo_before/after, ladder_before/after, lp_delta: cómo cambió
+     cada uno en cada partida (para el historial)
    ======================================= */
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 
 const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
-const Elo = require(path.join(WWW_DIR, "elo.js"));
+const Elo = require(path.join(WWW_DIR, "elo.js")); // MMR oculto
+const Ranked = require("./ranked"); // ligas y LP visibles
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "donde.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -85,28 +88,42 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status, finished_at);
 `);
 
-/* ---------- Migración: columnas de Elo ----------
-   Las bases de datos creadas antes del Elo no tienen estas columnas.
-   Se añaden y se recalcula el Elo de todas las partidas ya jugadas, en orden. */
+/* ---------- Migraciones ----------
+   Las bases de datos creadas antes no tienen estas columnas. Se añaden y se
+   recalcula el MMR y el rango de todas las partidas ya jugadas, en orden. */
 function hasColumn(table, column) {
   return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
 }
 let needsRecompute = false;
-if (!hasColumn("players", "elo")) {
-  db.exec(`
-    ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
-    ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;
-  `);
+function addColumns(table, check, sql) {
+  if (hasColumn(table, check)) return;
+  db.exec(sql);
   needsRecompute = true;
 }
-if (!hasColumn("match_players", "elo_before")) {
-  db.exec(`
-    ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
-    ALTER TABLE match_players ADD COLUMN elo_after INTEGER;
-  `);
-  needsRecompute = true;
-}
-db.exec("CREATE INDEX IF NOT EXISTS idx_players_elo ON players(elo DESC)");
+// MMR oculto (Elo)
+addColumns("players", "elo", `
+  ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
+  ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;`);
+addColumns("match_players", "elo_before", `
+  ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
+  ALTER TABLE match_players ADD COLUMN elo_after INTEGER;`);
+// Rango visible: "ladder" (ver ranked.js). NULL = en partidas de clasificación
+addColumns("players", "ladder", `ALTER TABLE players ADD COLUMN ladder INTEGER;`);
+addColumns("match_players", "ladder_before", `
+  ALTER TABLE match_players ADD COLUMN ladder_before INTEGER;
+  ALTER TABLE match_players ADD COLUMN ladder_after INTEGER;
+  ALTER TABLE match_players ADD COLUMN lp_delta INTEGER;`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_players_ladder ON players(ladder DESC)");
+
+// Estadísticas de cada jugador, para las tablas
+const STATS = `
+  SELECT p.id, p.name, p.ladder, p.elo_games AS games,
+         SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
+         MAX(mp.score) AS best_score,
+         SUM(mp.hits)  AS hits
+  FROM players p
+  JOIN match_players mp ON mp.player_id = p.id
+  JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'`;
 
 const q = {
   upsertPlayer: db.prepare(`
@@ -135,32 +152,27 @@ const q = {
   closeOrphans: db.prepare(
     "UPDATE matches SET status = 'abandoned', finished_at = datetime('now') WHERE status = 'playing'",
   ),
-  // Ranking online: ordenado por Elo; solo jugadores con al menos una partida terminada
-  ranking: db.prepare(`
-    SELECT p.name,
-           p.elo,
-           p.elo_games                              AS games,
-           SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
-           SUM(mp.score)                            AS total_points,
-           MAX(mp.score)                            AS best_score,
-           SUM(mp.hits)                             AS hits,
-           SUM(m.total_rounds)                      AS rounds,
-           p.id = @me                               AS you
-    FROM players p
-    JOIN match_players mp ON mp.player_id = p.id
-    JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
-    WHERE p.elo_games > 0
-    GROUP BY p.id
-    ORDER BY p.elo DESC, wins DESC
-    LIMIT @limit
-  `),
-  playerElo: db.prepare("SELECT id, elo, elo_games FROM players WHERE id = ?"),
-  setPlayerElo: db.prepare("UPDATE players SET elo = ?, elo_games = elo_games + 1 WHERE id = ?"),
-  setMatchElo: db.prepare(
-    "UPDATE match_players SET elo_before = ?, elo_after = ? WHERE match_id = ? AND player_id = ?",
+  player: db.prepare("SELECT id, name, elo, elo_games, ladder FROM players WHERE id = ?"),
+  setPlayerRank: db.prepare(
+    "UPDATE players SET elo = ?, elo_games = elo_games + 1, ladder = ? WHERE id = ?",
   ),
+  setMatchRank: db.prepare(`
+    UPDATE match_players SET elo_before = ?, elo_after = ?, ladder_before = ?, ladder_after = ?, lp_delta = ?
+    WHERE match_id = ? AND player_id = ?`),
+  // Los de una división (Hierro IV ... Diamante I): un tramo de 100 de "ladder"
+  division: db.prepare(`${STATS}
+    WHERE p.ladder BETWEEN ? AND ?
+    GROUP BY p.id
+    ORDER BY p.ladder DESC, wins DESC
+    LIMIT ?`),
+  // Maestro y superiores: se reparten por puesto, así que se leen todos
+  masters: db.prepare(`${STATS}
+    WHERE p.ladder >= ?
+    GROUP BY p.id
+    ORDER BY p.ladder DESC, wins DESC`),
   history: db.prepare(`
-    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position, mp.elo_before, mp.elo_after,
+    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position,
+           mp.ladder_before, mp.ladder_after, mp.lp_delta,
            (SELECT COUNT(*) FROM match_players x WHERE x.match_id = m.id) AS players
     FROM match_players mp
     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
@@ -173,36 +185,102 @@ const q = {
 // Si el servidor se reinició a mitad de partida, esas partidas ya no existen en memoria
 q.closeOrphans.run();
 
-// Aplica el Elo de una partida terminada. Devuelve { playerId: {before, after, delta} }
-function applyElo(matchId, standings) {
-  const players = standings.map((s) => {
-    const row = q.playerElo.get(s.id);
-    return { id: s.id, rating: row ? row.elo : Elo.START, games: row ? row.elo_games : 0, position: s.position };
+/**
+ * Aplica una partida terminada: MMR (Elo, oculto) y rango (LP, visible).
+ * Devuelve { playerId: { lpDelta, before, after, change, placed, gamesPlayed, mmrBefore, mmrAfter } }
+ */
+function applyRanked(matchId, standings) {
+  const rows = standings.map((s) => {
+    const row = q.player.get(s.id);
+    return {
+      id: s.id,
+      position: s.position,
+      rating: row ? row.elo : Elo.START,
+      games: row ? row.elo_games : 0,
+      ladder: row ? row.ladder : null,
+    };
   });
+  const mmr = Object.fromEntries(Elo.rateMatch(rows).map((r) => [r.id, r]));
+  const lp = Ranked.applyMatch(rows.map((r) => ({
+    id: r.id,
+    position: r.position,
+    games: r.games,
+    ladder: r.ladder,
+    mmrBefore: r.rating,
+    mmrAfter: mmr[r.id].after,
+  })));
+
   const out = {};
-  for (const r of Elo.rateMatch(players)) {
-    q.setPlayerElo.run(r.after, r.id);
-    q.setMatchElo.run(r.before, r.after, matchId, r.id);
-    out[r.id] = { before: r.before, after: r.after, delta: r.delta };
+  for (const r of rows) {
+    const m = mmr[r.id];
+    const l = lp[r.id];
+    q.setPlayerRank.run(m.after, l.ladderAfter, r.id);
+    q.setMatchRank.run(m.before, m.after, l.ladderBefore, l.ladderAfter, l.lpDelta, matchId, r.id);
+    out[r.id] = { ...l, mmrBefore: m.before, mmrAfter: m.after };
   }
   return out;
 }
 
-// Vuelve a calcular el Elo de todos desde cero, partida a partida (solo al migrar)
-const recomputeElo = db.transaction(() => {
-  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0`).run();
+// Vuelve a calcular todo desde cero, partida a partida (solo al migrar)
+const recompute = db.transaction(() => {
+  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0, ladder = NULL`).run();
   const matches = db
     .prepare("SELECT id FROM matches WHERE status = 'finished' ORDER BY finished_at, id")
     .all();
   const standingsOf = db.prepare(
     "SELECT player_id AS id, position FROM match_players WHERE match_id = ? AND position IS NOT NULL",
   );
-  for (const m of matches) applyElo(m.id, standingsOf.all(m.id));
+  for (const m of matches) applyRanked(m.id, standingsOf.all(m.id));
   return matches.length;
 });
 if (needsRecompute) {
-  const n = recomputeElo();
-  if (n) console.log(`Elo recalculado a partir de ${n} partidas ya jugadas`);
+  const n = recompute();
+  if (n) console.log(`MMR y rangos recalculados a partir de ${n} partidas ya jugadas`);
+}
+
+// Rango legible de un jugador (con Gran Maestro / Aspirante resueltos)
+function rankOf(playerId) {
+  const row = q.player.get(playerId);
+  if (!row) return Ranked.describe(null, 0);
+  let apex = null;
+  if (row.ladder !== null && row.ladder >= Ranked.CFG.MASTER_LADDER) {
+    apex = Ranked.apexTiers(q.masters.all(Ranked.CFG.MASTER_LADDER))[row.id];
+  }
+  return Ranked.describe(row.ladder, row.elo_games, apex);
+}
+
+/**
+ * La tabla de la división del jugador. Si aún no tiene rango, tabla vacía.
+ * Devuelve { me, table: { key, name } | null, ranking: [...] }
+ */
+function divisionTable(playerId, limit) {
+  const me = rankOf(playerId);
+  if (me.tier === "unranked") return { me, table: null, ranking: [] };
+
+  let rows;
+  if (me.division) {
+    const row = q.player.get(playerId);
+    const [lo, hi] = Ranked.divisionRange(row.ladder);
+    rows = q.division.all(lo, hi, limit);
+  } else {
+    // Maestro, Gran Maestro y Aspirante: misma liga, ya repartida por puesto
+    const all = q.masters.all(Ranked.CFG.MASTER_LADDER);
+    const apex = Ranked.apexTiers(all);
+    rows = all.filter((r) => apex[r.id] === me.tier).slice(0, limit);
+  }
+  return {
+    me,
+    table: { key: me.key, name: me.division ? `${me.tierName} ${me.division}` : me.tierName, tier: me.tier },
+    ranking: rows.map((r, i) => ({
+      position: i + 1,
+      name: r.name,
+      lp: Ranked.describe(r.ladder).lp,
+      games: r.games,
+      wins: r.wins,
+      best_score: r.best_score,
+      you: r.id === playerId,
+    })),
+  };
 }
 
 module.exports = {
@@ -225,25 +303,18 @@ module.exports = {
     q.insertShot.run({ ...row, isHit: row.isHit ? 1 : 0 });
   },
 
-  // Cierra la partida. Si terminó de verdad (no abandonada), aplica el Elo y lo devuelve
+  // Cierra la partida. Si terminó de verdad (no abandonada), aplica MMR y LP y lo devuelve
   finishMatch: db.transaction((matchId, status, standings) => {
     for (const s of standings) {
       q.updateMatchPlayer.run(s.score, s.hits, s.position ?? null, matchId, s.id);
     }
     q.finishMatch.run(status, matchId);
-    return status === "finished" ? applyElo(matchId, standings) : {};
+    return status === "finished" ? applyRanked(matchId, standings) : {};
   }),
 
-  playerElo(playerId) {
-    const row = q.playerElo.get(playerId);
-    return row ? { elo: row.elo, games: row.elo_games } : { elo: Elo.START, games: 0 };
-  },
-
-  recomputeElo,
-
-  ranking(limit, me) {
-    return q.ranking.all({ limit, me: me || "" }).map((r) => ({ ...r, you: !!r.you }));
-  },
+  rankOf,
+  divisionTable,
+  recompute,
 
   history(playerId) {
     return q.history.all(playerId);

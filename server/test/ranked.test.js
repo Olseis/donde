@@ -1,0 +1,111 @@
+/* Pruebas de la clasificatoria: reparto de LP por puesto, partidas de clasificación,
+   ascensos, Maestro+ y tabla de cada división, con una BD temporal.
+   Uso:  node test/ranked.test.js  */
+const assert = require("assert");
+const path = require("path");
+const os = require("os");
+const fs = require("fs");
+
+process.env.DB_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "donde-ranked-")), "r.db");
+const R = require("../ranked");
+const store = require("../db");
+
+// 1. Pesos por puesto
+const ten = Array.from({ length: 10 }, (_, i) => ({ id: `p${i + 1}`, position: i + 1 }));
+const w10 = R.placementWeights(ten);
+assert.deepStrictEqual(
+  ten.map((p) => w10[p.id]),
+  [1, 0.7, 0.45, 0.25, 0.1, -0.1, -0.25, -0.45, -0.7, -1],
+);
+const w4 = R.placementWeights(ten.slice(0, 4));
+assert.deepStrictEqual([w4.p1, w4.p2, w4.p3, w4.p4], [1, 0.7, -0.7, -1]);
+const w3 = R.placementWeights(ten.slice(0, 3));
+assert.deepStrictEqual([w3.p1, w3.p2, w3.p3], [1, 0, -1]);
+const tie = R.placementWeights([{ id: "a", position: 1 }, { id: "b", position: 1 }]);
+assert.deepStrictEqual([tie.a, tie.b], [0, 0], "empate entre dos: nadie gana ni pierde");
+console.log("✔ reparto por puesto (10, 4, 3 jugadores y empate)");
+
+// 2. Nombres de rango
+assert.strictEqual(R.describe(0).label, "Hierro IV · 0 LP");
+assert.strictEqual(R.describe(1345).label, "Oro III · 45 LP");
+assert.strictEqual(R.describe(2799).label, "Diamante I · 99 LP");
+assert.strictEqual(R.describe(3150).label, "Maestro · 350 LP");
+assert.strictEqual(R.describe(null, 2).label, "Clasificación 2/5");
+console.log("✔ nombres de rango");
+
+// 3. LP en una partida de 10 con todos en Oro IV y MMR acorde (factor 1)
+const gold4 = 1200;
+const mmr = R.rankMmr(gold4);
+const res = R.applyMatch(ten.map((p) => ({ ...p, games: 20, ladder: gold4, mmrBefore: mmr, mmrAfter: mmr })));
+const lps = ten.map((p) => res[p.id].lpDelta);
+console.log("  LP Oro IV, 10 jugadores:", lps.join(" "));
+assert.deepStrictEqual(lps, [25, 18, 11, 6, 3, -3, -6, -11, -18, -25]);
+assert.strictEqual(res.p10.after, "Plata I · 75 LP", "perder en Oro IV con 0 LP baja a Plata I");
+assert.strictEqual(res.p10.change, "demoted");
+
+// MMR por encima del rango: gana más, pierde menos
+const strong = R.applyMatch([
+  { id: "a", position: 1, games: 20, ladder: gold4, mmrBefore: mmr + 200, mmrAfter: mmr + 210 },
+  { id: "b", position: 2, games: 20, ladder: gold4, mmrBefore: mmr + 200, mmrAfter: mmr + 190 },
+]);
+assert(strong.a.lpDelta > 25 && strong.b.lpDelta > -25, "MMR alto: +más / -menos");
+console.log("✔ LP por puesto y corrección por MMR");
+
+// Ascenso de división
+const up = R.applyMatch([
+  { id: "a", position: 1, games: 20, ladder: 1290, mmrBefore: R.rankMmr(1290), mmrAfter: 0 },
+  { id: "b", position: 2, games: 20, ladder: 1290, mmrBefore: R.rankMmr(1290), mmrAfter: 0 },
+]);
+assert.strictEqual(up.a.after, "Oro III · 15 LP");
+assert.strictEqual(up.a.change, "promoted");
+// Suelo en Hierro IV
+const floor = R.applyMatch([
+  { id: "a", position: 1, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
+  { id: "b", position: 2, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
+]);
+assert.strictEqual(floor.b.after, "Hierro IV · 0 LP");
+console.log("✔ ascensos, descensos y suelo en Hierro IV");
+
+// 4. Con la base de datos: 10 jugadores, 6 partidas siempre en el mismo orden
+const ids = ten.map((p) => `jugador-${p.id}-xx`);
+ids.forEach((id, i) => store.savePlayer(id, `J${i + 1}`));
+for (let g = 1; g <= 6; g++) {
+  const matchId = store.createMatch("TEST", "Europa", [{ kind: "country", id: "FRA", name: "Francia" }],
+    ids.map((id, i) => ({ id, name: `J${i + 1}` })));
+  const out = store.finishMatch(matchId, "finished",
+    ids.map((id, i) => ({ id, score: 1000 - i * 50, hits: 10 - i, position: i + 1 })));
+  if (g <= 4) assert.strictEqual(store.rankOf(ids[0]).label, `Clasificación ${g}/5`);
+  if (g === 5) {
+    assert(Object.values(out).every((r) => r.change === "placed"), "tras la 5.ª todos tienen rango");
+    console.log("  Tras la clasificación:", ids.map((id) => store.rankOf(id).label).join(" | "));
+  }
+  if (g === 6) console.log("  Tras la 6.ª:", ids.slice(0, 3).map((id) => `${store.rankOf(id).label} (${out[id].lpDelta >= 0 ? "+" : ""}${out[id].lpDelta})`).join(" | "));
+}
+const best = store.rankOf(ids[0]);
+const worst = store.rankOf(ids[9]);
+assert(best.tier !== "unranked" && worst.tier !== "unranked");
+assert(R.TIERS.findIndex((t) => t.id === best.tier) >= R.TIERS.findIndex((t) => t.id === worst.tier),
+  "el que siempre gana queda igual o por encima");
+
+// La tabla de cada uno solo tiene jugadores de su misma división
+for (const id of [ids[0], ids[5], ids[9]]) {
+  const t = store.divisionTable(id, 50);
+  const mine = store.rankOf(id);
+  assert(t.ranking.some((r) => r.you), "te ves en tu tabla");
+  for (const r of t.ranking) assert(r.lp >= 0 && r.lp <= 99);
+  assert.strictEqual(t.table.key, mine.key);
+  console.log(`  Tabla de ${mine.tierName} ${mine.division}:`, t.ranking.map((r) => `${r.name} ${r.lp}`).join(", "));
+}
+const unranked = "jugador-nuevo-123";
+store.savePlayer(unranked, "Nuevo");
+assert.strictEqual(store.divisionTable(unranked, 50).table, null);
+console.log("✔ clasificación, tablas por división y jugador sin rango");
+
+// 5. Maestro, Gran Maestro y Aspirante
+const apex = R.apexTiers([
+  { id: "x", ladder: 2800 + 900 }, { id: "y", ladder: 2800 + 300 }, { id: "z", ladder: 2800 + 50 },
+]);
+assert.deepStrictEqual(apex, { x: "challenger", y: "grandmaster", z: "master" });
+console.log("✔ Maestro / Gran Maestro / Aspirante");
+
+console.log("\n✅ Clasificatoria correcta");

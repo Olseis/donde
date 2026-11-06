@@ -717,3 +717,21 @@ input, textarea {
 .online-results #map-wrapper {
     height: 32vh;
 }
+
+/* Rango tras una partida online */
+.match-rank {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    margin: 0 0 6px 0;
+}
+.match-rank-now {
+    color: #E2A342;
+    font-size: 1.15rem;
+    font-weight: bold;
+}
+.match-rank-change {
+    margin-top: 4px;
+    font-size: 1rem;
+}
+.match-rank-change.promoted, .match-rank-change.placed { color: #4ade80; }
+.match-rank-change.demoted { color: #f87171; }

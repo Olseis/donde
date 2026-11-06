@@ -36,7 +36,7 @@ Al terminar: abre `https://217.72.207.119/api/health` → debe responder `{"ok":
 ## Cómo funciona una partida online
 
 1. Un jugador pulsa **Online → Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
-2. Los demás (2 a 6) pulsan **Unirse**, escriben el código y eligen su ubicación.
+2. Los demás (hasta 10 en total) pulsan **Unirse**, escriben el código y eligen su ubicación.
 3. El anfitrión (👑) pulsa **Empezar**. El servidor elige los 10 destinos (nunca el país de ningún jugador).
 4. En cada ronda todos ven el mismo destino a la vez y tienen 60 s. El móvil **solo manda el rumbo**:
    el servidor calcula el acierto con el mismo código que el juego (`www/shot.js`) y reparte los puntos.
