@@ -1,0 +1,969 @@
+From ec69fee1406aeaf9c15358d533d0c459f3f3a4db Mon Sep 17 00:00:00 2001
+From: Raoul Labrunie <rlabrunieespinosa@gmail.com>
+Date: Fri, 6 Nov 2026 10:37:15 +0100
+Subject: [PATCH] New: Clasificatoria por ligas como en el LoL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Ligas Hierro, Bronce, Plata, Oro, Platino, Esmeralda y Diamante (IV a I, 100 LP
+  por división) y Maestro, Gran Maestro y Aspirante.
+- 5 partidas de clasificación; después el MMR coloca entre Hierro IV y Platino IV.
+- LP según el puesto: los 5 primeros ganan (100 %, 70 %, 45 %, 25 %, 10 %) y los
+  5 últimos pierden al revés; el 100 % son 25 LP corregidos por el MMR.
+- El Elo pasa a ser el MMR oculto. Migración que recalcula rangos.
+- Salas de hasta 10 jugadores.
+- El ranking online muestra solo la tabla de tu división; rango en la sala de
+  espera y +LP / ascensos al acabar.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PoXBcbacCKFxXiwBt5sAEc
+---
+ deploy/README.md            |   2 +-
+ server/db.js                | 213 ++++++++++++++++++++++------------
+ server/index.js             |   6 +-
+ server/package.json         |   2 +-
+ server/ranked.js            | 221 ++++++++++++++++++++++++++++++++++++
+ server/rooms.js             |  25 ++--
+ server/test/partida.test.js |  12 +-
+ server/test/ranked.test.js  | 111 ++++++++++++++++++
+ www/index.html              |   3 +-
+ www/online.js               |  77 +++++++++----
+ www/style.css               |  18 +++
+ 11 files changed, 582 insertions(+), 108 deletions(-)
+ create mode 100644 server/ranked.js
+ create mode 100644 server/test/ranked.test.js
+
+diff --git a/deploy/README.md b/deploy/README.md
+index cd1e834..0de34ee 100644
+--- a/deploy/README.md
++++ b/deploy/README.md
+@@ -36,7 +36,7 @@ Al terminar: abre `https://217.72.207.119/api/health` → debe responder `{"ok":
+ ## Cómo funciona una partida online
+ 
+ 1. Un jugador pulsa **Online → Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
+-2. Los demás (2 a 6) pulsan **Unirse**, escriben el código y eligen su ubicación.
++2. Los demás (hasta 10 en total) pulsan **Unirse**, escriben el código y eligen su ubicación.
+ 3. El anfitrión (👑) pulsa **Empezar**. El servidor elige los 10 destinos (nunca el país de ningún jugador).
+ 4. En cada ronda todos ven el mismo destino a la vez y tienen 60 s. El móvil **solo manda el rumbo**:
+    el servidor calcula el acierto con el mismo código que el juego (`www/shot.js`) y reparte los puntos.
+diff --git a/server/db.js b/server/db.js
+index 846df42..8b4689d 100644
+--- a/server/db.js
++++ b/server/db.js
+@@ -12,16 +12,19 @@
+    - rounds         el destino de cada ronda
+    - shots          cada disparo: rumbo, ubicación y lo que decidió el servidor
+ 
+-   Elo: players.elo / players.elo_games guardan el Elo actual, y
+-   match_players.elo_before / elo_after cuánto tenía cada uno antes y
+-   después de cada partida (para el historial).
++   Clasificatoria (ver ranked.js):
++   - players.elo / elo_games: MMR oculto y partidas jugadas
++   - players.ladder: rango visible como un solo número (NULL = en clasificación)
++   - match_players.elo_before/after, ladder_before/after, lp_delta: cómo cambió
++     cada uno en cada partida (para el historial)
+    ======================================= */
+ const fs = require("fs");
+ const path = require("path");
+ const Database = require("better-sqlite3");
+ 
+ const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
+-const Elo = require(path.join(WWW_DIR, "elo.js"));
++const Elo = require(path.join(WWW_DIR, "elo.js")); // MMR oculto
++const Ranked = require("./ranked"); // ligas y LP visibles
+ 
+ const DB_PATH = process.env.DB_PATH || path.join(__dirname, "donde.db");
+ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+@@ -85,28 +88,42 @@ db.exec(`
+   CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status, finished_at);
+ `);
+ 
+-/* ---------- Migración: columnas de Elo ----------
+-   Las bases de datos creadas antes del Elo no tienen estas columnas.
+-   Se añaden y se recalcula el Elo de todas las partidas ya jugadas, en orden. */
++/* ---------- Migraciones ----------
++   Las bases de datos creadas antes no tienen estas columnas. Se añaden y se
++   recalcula el MMR y el rango de todas las partidas ya jugadas, en orden. */
+ function hasColumn(table, column) {
+   return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+ }
+ let needsRecompute = false;
+-if (!hasColumn("players", "elo")) {
+-  db.exec(`
+-    ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
+-    ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;
+-  `);
++function addColumns(table, check, sql) {
++  if (hasColumn(table, check)) return;
++  db.exec(sql);
+   needsRecompute = true;
+ }
+-if (!hasColumn("match_players", "elo_before")) {
+-  db.exec(`
+-    ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
+-    ALTER TABLE match_players ADD COLUMN elo_after INTEGER;
+-  `);
+-  needsRecompute = true;
+-}
+-db.exec("CREATE INDEX IF NOT EXISTS idx_players_elo ON players(elo DESC)");
++// MMR oculto (Elo)
++addColumns("players", "elo", `
++  ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
++  ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;`);
++addColumns("match_players", "elo_before", `
++  ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
++  ALTER TABLE match_players ADD COLUMN elo_after INTEGER;`);
++// Rango visible: "ladder" (ver ranked.js). NULL = en partidas de clasificación
++addColumns("players", "ladder", `ALTER TABLE players ADD COLUMN ladder INTEGER;`);
++addColumns("match_players", "ladder_before", `
++  ALTER TABLE match_players ADD COLUMN ladder_before INTEGER;
++  ALTER TABLE match_players ADD COLUMN ladder_after INTEGER;
++  ALTER TABLE match_players ADD COLUMN lp_delta INTEGER;`);
++db.exec("CREATE INDEX IF NOT EXISTS idx_players_ladder ON players(ladder DESC)");
++
++// Estadísticas de cada jugador, para las tablas
++const STATS = `
++  SELECT p.id, p.name, p.ladder, p.elo_games AS games,
++         SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
++         MAX(mp.score) AS best_score,
++         SUM(mp.hits)  AS hits
++  FROM players p
++  JOIN match_players mp ON mp.player_id = p.id
++  JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'`;
+ 
+ const q = {
+   upsertPlayer: db.prepare(`
+@@ -135,32 +152,27 @@ const q = {
+   closeOrphans: db.prepare(
+     "UPDATE matches SET status = 'abandoned', finished_at = datetime('now') WHERE status = 'playing'",
+   ),
+-  // Ranking online: ordenado por Elo; solo jugadores con al menos una partida terminada
+-  ranking: db.prepare(`
+-    SELECT p.name,
+-           p.elo,
+-           p.elo_games                              AS games,
+-           SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
+-           SUM(mp.score)                            AS total_points,
+-           MAX(mp.score)                            AS best_score,
+-           SUM(mp.hits)                             AS hits,
+-           SUM(m.total_rounds)                      AS rounds,
+-           p.id = @me                               AS you
+-    FROM players p
+-    JOIN match_players mp ON mp.player_id = p.id
+-    JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
+-    WHERE p.elo_games > 0
+-    GROUP BY p.id
+-    ORDER BY p.elo DESC, wins DESC
+-    LIMIT @limit
+-  `),
+-  playerElo: db.prepare("SELECT id, elo, elo_games FROM players WHERE id = ?"),
+-  setPlayerElo: db.prepare("UPDATE players SET elo = ?, elo_games = elo_games + 1 WHERE id = ?"),
+-  setMatchElo: db.prepare(
+-    "UPDATE match_players SET elo_before = ?, elo_after = ? WHERE match_id = ? AND player_id = ?",
++  player: db.prepare("SELECT id, name, elo, elo_games, ladder FROM players WHERE id = ?"),
++  setPlayerRank: db.prepare(
++    "UPDATE players SET elo = ?, elo_games = elo_games + 1, ladder = ? WHERE id = ?",
+   ),
++  setMatchRank: db.prepare(`
++    UPDATE match_players SET elo_before = ?, elo_after = ?, ladder_before = ?, ladder_after = ?, lp_delta = ?
++    WHERE match_id = ? AND player_id = ?`),
++  // Los de una división (Hierro IV ... Diamante I): un tramo de 100 de "ladder"
++  division: db.prepare(`${STATS}
++    WHERE p.ladder BETWEEN ? AND ?
++    GROUP BY p.id
++    ORDER BY p.ladder DESC, wins DESC
++    LIMIT ?`),
++  // Maestro y superiores: se reparten por puesto, así que se leen todos
++  masters: db.prepare(`${STATS}
++    WHERE p.ladder >= ?
++    GROUP BY p.id
++    ORDER BY p.ladder DESC, wins DESC`),
+   history: db.prepare(`
+-    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position, mp.elo_before, mp.elo_after,
++    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position,
++           mp.ladder_before, mp.ladder_after, mp.lp_delta,
+            (SELECT COUNT(*) FROM match_players x WHERE x.match_id = m.id) AS players
+     FROM match_players mp
+     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
+@@ -173,36 +185,102 @@ const q = {
+ // Si el servidor se reinició a mitad de partida, esas partidas ya no existen en memoria
+ q.closeOrphans.run();
+ 
+-// Aplica el Elo de una partida terminada. Devuelve { playerId: {before, after, delta} }
+-function applyElo(matchId, standings) {
+-  const players = standings.map((s) => {
+-    const row = q.playerElo.get(s.id);
+-    return { id: s.id, rating: row ? row.elo : Elo.START, games: row ? row.elo_games : 0, position: s.position };
++/**
++ * Aplica una partida terminada: MMR (Elo, oculto) y rango (LP, visible).
++ * Devuelve { playerId: { lpDelta, before, after, change, placed, gamesPlayed, mmrBefore, mmrAfter } }
++ */
++function applyRanked(matchId, standings) {
++  const rows = standings.map((s) => {
++    const row = q.player.get(s.id);
++    return {
++      id: s.id,
++      position: s.position,
++      rating: row ? row.elo : Elo.START,
++      games: row ? row.elo_games : 0,
++      ladder: row ? row.ladder : null,
++    };
+   });
++  const mmr = Object.fromEntries(Elo.rateMatch(rows).map((r) => [r.id, r]));
++  const lp = Ranked.applyMatch(rows.map((r) => ({
++    id: r.id,
++    position: r.position,
++    games: r.games,
++    ladder: r.ladder,
++    mmrBefore: r.rating,
++    mmrAfter: mmr[r.id].after,
++  })));
++
+   const out = {};
+-  for (const r of Elo.rateMatch(players)) {
+-    q.setPlayerElo.run(r.after, r.id);
+-    q.setMatchElo.run(r.before, r.after, matchId, r.id);
+-    out[r.id] = { before: r.before, after: r.after, delta: r.delta };
++  for (const r of rows) {
++    const m = mmr[r.id];
++    const l = lp[r.id];
++    q.setPlayerRank.run(m.after, l.ladderAfter, r.id);
++    q.setMatchRank.run(m.before, m.after, l.ladderBefore, l.ladderAfter, l.lpDelta, matchId, r.id);
++    out[r.id] = { ...l, mmrBefore: m.before, mmrAfter: m.after };
+   }
+   return out;
+ }
+ 
+-// Vuelve a calcular el Elo de todos desde cero, partida a partida (solo al migrar)
+-const recomputeElo = db.transaction(() => {
+-  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0`).run();
++// Vuelve a calcular todo desde cero, partida a partida (solo al migrar)
++const recompute = db.transaction(() => {
++  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0, ladder = NULL`).run();
+   const matches = db
+     .prepare("SELECT id FROM matches WHERE status = 'finished' ORDER BY finished_at, id")
+     .all();
+   const standingsOf = db.prepare(
+     "SELECT player_id AS id, position FROM match_players WHERE match_id = ? AND position IS NOT NULL",
+   );
+-  for (const m of matches) applyElo(m.id, standingsOf.all(m.id));
++  for (const m of matches) applyRanked(m.id, standingsOf.all(m.id));
+   return matches.length;
+ });
+ if (needsRecompute) {
+-  const n = recomputeElo();
+-  if (n) console.log(`Elo recalculado a partir de ${n} partidas ya jugadas`);
++  const n = recompute();
++  if (n) console.log(`MMR y rangos recalculados a partir de ${n} partidas ya jugadas`);
++}
++
++// Rango legible de un jugador (con Gran Maestro / Aspirante resueltos)
++function rankOf(playerId) {
++  const row = q.player.get(playerId);
++  if (!row) return Ranked.describe(null, 0);
++  let apex = null;
++  if (row.ladder !== null && row.ladder >= Ranked.CFG.MASTER_LADDER) {
++    apex = Ranked.apexTiers(q.masters.all(Ranked.CFG.MASTER_LADDER))[row.id];
++  }
++  return Ranked.describe(row.ladder, row.elo_games, apex);
++}
++
++/**
++ * La tabla de la división del jugador. Si aún no tiene rango, tabla vacía.
++ * Devuelve { me, table: { key, name } | null, ranking: [...] }
++ */
++function divisionTable(playerId, limit) {
++  const me = rankOf(playerId);
++  if (me.tier === "unranked") return { me, table: null, ranking: [] };
++
++  let rows;
++  if (me.division) {
++    const row = q.player.get(playerId);
++    const [lo, hi] = Ranked.divisionRange(row.ladder);
++    rows = q.division.all(lo, hi, limit);
++  } else {
++    // Maestro, Gran Maestro y Aspirante: misma liga, ya repartida por puesto
++    const all = q.masters.all(Ranked.CFG.MASTER_LADDER);
++    const apex = Ranked.apexTiers(all);
++    rows = all.filter((r) => apex[r.id] === me.tier).slice(0, limit);
++  }
++  return {
++    me,
++    table: { key: me.key, name: me.division ? `${me.tierName} ${me.division}` : me.tierName, tier: me.tier },
++    ranking: rows.map((r, i) => ({
++      position: i + 1,
++      name: r.name,
++      lp: Ranked.describe(r.ladder).lp,
++      games: r.games,
++      wins: r.wins,
++      best_score: r.best_score,
++      you: r.id === playerId,
++    })),
++  };
+ }
+ 
+ module.exports = {
+@@ -225,25 +303,18 @@ module.exports = {
+     q.insertShot.run({ ...row, isHit: row.isHit ? 1 : 0 });
+   },
+ 
+-  // Cierra la partida. Si terminó de verdad (no abandonada), aplica el Elo y lo devuelve
++  // Cierra la partida. Si terminó de verdad (no abandonada), aplica MMR y LP y lo devuelve
+   finishMatch: db.transaction((matchId, status, standings) => {
+     for (const s of standings) {
+       q.updateMatchPlayer.run(s.score, s.hits, s.position ?? null, matchId, s.id);
+     }
+     q.finishMatch.run(status, matchId);
+-    return status === "finished" ? applyElo(matchId, standings) : {};
++    return status === "finished" ? applyRanked(matchId, standings) : {};
+   }),
+ 
+-  playerElo(playerId) {
+-    const row = q.playerElo.get(playerId);
+-    return row ? { elo: row.elo, games: row.elo_games } : { elo: Elo.START, games: 0 };
+-  },
+-
+-  recomputeElo,
+-
+-  ranking(limit, me) {
+-    return q.ranking.all({ limit, me: me || "" }).map((r) => ({ ...r, you: !!r.you }));
+-  },
++  rankOf,
++  divisionTable,
++  recompute,
+ 
+   history(playerId) {
+     return q.history.all(playerId);
+diff --git a/server/index.js b/server/index.js
+index eedb16b..d7eed5e 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -55,11 +55,13 @@ app.use((req, res, next) => {
+ 
+ app.get("/api/health", (req, res) => res.json({ ok: true, ...rooms.stats() }));
+ 
+-// Ranking de las partidas online: victorias, luego puntos totales
++// Ranking online: la tabla de TU división (Oro II, Plata IV...) y tu rango.
++// Sin playerId, o si aún estás en partidas de clasificación, la tabla viene vacía.
+ app.get("/api/online/ranking", (req, res) => {
+   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+   const me = PLAYER_ID_REGEX.test(req.query.playerId || "") ? req.query.playerId : null;
+-  res.json({ ranking: store.ranking(limit, me) });
++  if (!me) return res.json({ me: null, table: null, ranking: [] });
++  res.json(store.divisionTable(me, limit));
+ });
+ 
+ // Últimas partidas de un jugador
+diff --git a/server/package.json b/server/package.json
+index f9bc48c..0df4413 100644
+--- a/server/package.json
++++ b/server/package.json
+@@ -6,7 +6,7 @@
+   "main": "index.js",
+   "scripts": {
+     "start": "node index.js",
+-    "test": "node test/partida.test.js"
++    "test": "node test/ranked.test.js && node test/partida.test.js"
+   },
+   "engines": { "node": ">=20" },
+   "dependencies": {
+diff --git a/server/ranked.js b/server/ranked.js
+new file mode 100644
+index 0000000..0d0346b
+--- /dev/null
++++ b/server/ranked.js
+@@ -0,0 +1,221 @@
++/* =======================================
++   CLASIFICATORIA (ligas como en el LoL)
++
++   Cada jugador tiene DOS números:
++   - MMR (oculto): su Elo de siempre (www/elo.js). Mide su nivel real.
++   - Rango visible: liga + división + LP, p. ej. "Oro II · 45 LP".
++
++   Ligas, de abajo arriba:
++     Hierro, Bronce, Plata, Oro, Platino, Esmeralda, Diamante  → divisiones IV, III, II, I
++     Maestro, Gran Maestro, Aspirante                            → sin divisiones, LP sin tope
++   Cada división son 100 LP: al pasar de 99 subes de división; al bajar de 0, bajas.
++   Gran Maestro y Aspirante no se ganan por LP sino por puesto entre los Maestros
++   (los mejores N), y se calculan al ver el ranking.
++
++   Internamente todo el rango es UN número, "ladder" (escalera):
++     0 = Hierro IV 0 LP · 100 = Hierro III 0 LP · ... · 2799 = Diamante I 99 LP
++     2800 en adelante = Maestro, con LP = ladder - 2800
++
++   Partidas de clasificación: las 5 primeras no dan LP. Al terminar la 5.ª,
++   el MMR decide dónde empiezas, entre Hierro IV y Platino IV.
++
++   LP de una partida (hasta 10 jugadores):
++   - Los 5 primeros ganan, de más a menos: 1.º 100 % · 2.º 70 % · 3.º 45 % · 4.º 25 % · 5.º 10 %
++   - Los 5 últimos pierden igual pero al revés: el último pierde el 100 %
++   - Con menos jugadores, gana la mitad de arriba y pierde la de abajo
++     (con 4: 1.º +100 %, 2.º +70 %, 3.º -70 %, 4.º -100 %). Si son impares, el del medio se queda igual.
++   - El 100 % son 25 LP, corregidos por el MMR como en el LoL: si tu nivel real
++     está por encima de tu rango ganas más y pierdes menos (hasta ×1,5), y al revés.
++   ======================================= */
++
++const TIERS = [
++  { id: "iron", name: "Hierro" },
++  { id: "bronze", name: "Bronce" },
++  { id: "silver", name: "Plata" },
++  { id: "gold", name: "Oro" },
++  { id: "platinum", name: "Platino" },
++  { id: "emerald", name: "Esmeralda" },
++  { id: "diamond", name: "Diamante" },
++];
++const APEX = {
++  master: { id: "master", name: "Maestro" },
++  grandmaster: { id: "grandmaster", name: "Gran Maestro" },
++  challenger: { id: "challenger", name: "Aspirante" },
++};
++const DIVISIONS = ["IV", "III", "II", "I"];
++
++const CFG = {
++  PLACEMENT_GAMES: 5,
++  PLACEMENT_MAX_LADDER: 4 * 400 + 99, // como mucho Platino IV
++  BASE_LP: 25,
++  // Peso del LP según el puesto, contando desde arriba (ganadores) o desde abajo (perdedores)
++  WEIGHTS: [1, 0.7, 0.45, 0.25, 0.1],
++  MASTER_LADDER: TIERS.length * 400, // 2800
++  // Gran Maestro y Aspirante: los mejores Maestros por LP, con un mínimo de LP
++  CHALLENGER: { top: 10, minLp: 500 },
++  GRANDMASTER: { top: 50, minLp: 200 },
++};
++
++// MMR que "corresponde" a cada rango: Hierro IV ≈ 600, Plata IV ≈ 1000, Oro IV ≈ 1200, Diamante I ≈ 2000
++function rankMmr(ladder) {
++  return 600 + ladder / 2;
++}
++
++function placementLadder(mmr) {
++  return Math.max(0, Math.min(CFG.PLACEMENT_MAX_LADDER, Math.round((mmr - 600) * 2)));
++}
++
++/**
++ * Convierte el número interno en algo legible.
++ * apexTier: 'grandmaster' | 'challenger' si ya se sabe (se calcula en el ranking)
++ */
++function describe(ladder, gamesPlayed = 0, apexTier = null) {
++  if (ladder === null || ladder === undefined) {
++    const played = Math.min(gamesPlayed, CFG.PLACEMENT_GAMES);
++    return {
++      tier: "unranked",
++      tierName: "Sin clasificar",
++      division: null,
++      lp: null,
++      label: `Clasificación ${played}/${CFG.PLACEMENT_GAMES}`,
++      placement: { played, total: CFG.PLACEMENT_GAMES },
++      key: "unranked",
++    };
++  }
++  if (ladder >= CFG.MASTER_LADDER) {
++    const t = APEX[apexTier] || APEX.master;
++    const lp = ladder - CFG.MASTER_LADDER;
++    return { tier: t.id, tierName: t.name, division: null, lp, label: `${t.name} · ${lp} LP`, key: t.id };
++  }
++  const t = TIERS[Math.floor(ladder / 400)];
++  const division = DIVISIONS[Math.floor((ladder % 400) / 100)];
++  const lp = ladder % 100;
++  return {
++    tier: t.id,
++    tierName: t.name,
++    division,
++    lp,
++    label: `${t.name} ${division} · ${lp} LP`,
++    key: `${t.id}-${division}`,
++  };
++}
++
++// Rango de "ladder" que ocupa una división (para buscar a los de tu tabla)
++function divisionRange(ladder) {
++  if (ladder >= CFG.MASTER_LADDER) return [CFG.MASTER_LADDER, Number.MAX_SAFE_INTEGER];
++  const lo = Math.floor(ladder / 100) * 100;
++  return [lo, lo + 99];
++}
++
++// Peso de cada puesto (posiciones 1..n, con empates compartidos) según el reparto de arriba
++function placementWeights(standings) {
++  const n = standings.length;
++  const w = Math.min(CFG.WEIGHTS.length, Math.floor(n / 2));
++  const sorted = [...standings].sort((a, b) => a.position - b.position);
++  const slot = (i) => (i < w ? CFG.WEIGHTS[i] : i >= n - w ? -CFG.WEIGHTS[n - 1 - i] : 0);
++  const out = {};
++  let i = 0;
++  while (i < n) {
++    // Los empatados se reparten la media de los huecos que ocupan
++    let j = i;
++    while (j + 1 < n && sorted[j + 1].position === sorted[i].position) j++;
++    let sum = 0;
++    for (let k = i; k <= j; k++) sum += slot(k);
++    for (let k = i; k <= j; k++) out[sorted[k].id] = sum / (j - i + 1);
++    i = j + 1;
++  }
++  return out;
++}
++
++/**
++ * LP de cada jugador tras una partida.
++ * @param players [{ id, position, mmrBefore, mmrAfter, ladder (null = sin clasificar), games (antes de esta) }]
++ * @returns { id: { ladderBefore, ladderAfter, lpDelta, placed, gamesPlayed, before, after, change } }
++ */
++function applyMatch(players) {
++  const weights = placementWeights(players);
++  const out = {};
++  for (const p of players) {
++    const games = p.games + 1;
++    const r = { ladderBefore: p.ladder, ladderAfter: p.ladder, lpDelta: 0, placed: false, gamesPlayed: games };
++
++    if (p.ladder === null || p.ladder === undefined) {
++      // Partidas de clasificación: sin LP; al acabar la última te colocan según tu MMR
++      if (games >= CFG.PLACEMENT_GAMES) {
++        r.ladderAfter = placementLadder(p.mmrAfter);
++        r.placed = true;
++      }
++    } else {
++      const weight = weights[p.id] || 0;
++      const diff = p.mmrBefore - rankMmr(p.ladder);
++      const winFactor = clamp(1 + diff / 400, 0.5, 1.5);
++      const lossFactor = clamp(1 - diff / 400, 0.5, 1.5);
++      const delta = weight > 0
++        ? Math.max(1, Math.round(CFG.BASE_LP * weight * winFactor))
++        : weight < 0
++          ? -Math.max(1, Math.round(CFG.BASE_LP * -weight * lossFactor)) // simétrico con las ganancias
++          : 0;
++      r.ladderAfter = Math.max(0, p.ladder + delta); // nadie baja de Hierro IV 0 LP
++      r.lpDelta = r.ladderAfter - p.ladder;
++    }
++
++    const before = describe(r.ladderBefore, p.games);
++    const after = describe(r.ladderAfter, games);
++    r.before = before.label;
++    r.after = after.label;
++    r.change = rankChange(before, after);
++    out[p.id] = r;
++  }
++  return out;
++}
++
++// "promoted" | "demoted" | "placed" | null (cambio de división o de liga)
++function rankChange(before, after) {
++  if (before.tier === "unranked") return after.tier === "unranked" ? null : "placed";
++  if (before.key === after.key) return null;
++  return order(after) > order(before) ? "promoted" : "demoted";
++}
++function order(d) {
++  if (d.tier === "unranked") return -1;
++  const t = TIERS.findIndex((x) => x.id === d.tier);
++  return t >= 0 ? t * 4 + DIVISIONS.indexOf(d.division) : 100;
++}
++
++/**
++ * Gran Maestro y Aspirante: entre todos los Maestros (ordenados por LP de mayor a menor),
++ * los primeros que cumplan el mínimo. Devuelve { playerId: 'challenger' | 'grandmaster' | 'master' }
++ */
++function apexTiers(masters) {
++  const out = {};
++  const sorted = [...masters].sort((a, b) => b.ladder - a.ladder);
++  let ch = 0;
++  let gm = 0;
++  for (const m of sorted) {
++    const lp = m.ladder - CFG.MASTER_LADDER;
++    if (ch < CFG.CHALLENGER.top && lp >= CFG.CHALLENGER.minLp) {
++      out[m.id] = "challenger";
++      ch++;
++    } else if (gm < CFG.GRANDMASTER.top && lp >= CFG.GRANDMASTER.minLp) {
++      out[m.id] = "grandmaster";
++      gm++;
++    } else out[m.id] = "master";
++  }
++  return out;
++}
++
++function clamp(x, lo, hi) {
++  return Math.min(hi, Math.max(lo, x));
++}
++
++module.exports = {
++  CFG,
++  TIERS,
++  DIVISIONS,
++  describe,
++  divisionRange,
++  placementWeights,
++  placementLadder,
++  rankMmr,
++  applyMatch,
++  apexTiers,
++};
+diff --git a/server/rooms.js b/server/rooms.js
+index fd77d0d..c097042 100644
+--- a/server/rooms.js
++++ b/server/rooms.js
+@@ -20,7 +20,7 @@ const store = require("./db");
+ const CFG = {
+   ROUNDS: 10,
+   MIN_PLAYERS: 2,
+-  MAX_PLAYERS: 6,
++  MAX_PLAYERS: 10,
+   SHOT_TIMEOUT_MS: 60_000, // tiempo para apuntar en cada ronda
+   NEXT_TIMEOUT_MS: 30_000, // tiempo viendo resultados antes de pasar solo
+   RECONNECT_GRACE_MS: 120_000, // si se va todo el mundo, la sala aguanta esto
+@@ -66,7 +66,7 @@ function publicRoom(room) {
+       connected: !!p.ws,
+       score: p.score,
+       hits: p.hits,
+-      elo: p.elo,
++      rank: p.rank,
+     })),
+   };
+ }
+@@ -138,7 +138,7 @@ function addPlayer(room, player) {
+ 
+   const p = {
+     id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
+-    elo: store.playerElo(player.id).elo, // se enseña en la sala de espera
++    rank: store.rankOf(player.id).label, // se enseña en la sala de espera
+   };
+   room.players.set(p.id, p);
+   player.ws.roomCode = room.code;
+@@ -364,11 +364,22 @@ function finish(room) {
+   room.status = "finished";
+   room.phase = null;
+   const final = standings(room);
+-  // Se guarda el resultado y se aplica el Elo; cada jugador recibe su Elo antes y después
+-  const elo = store.finishMatch(room.matchId, "finished", final);
++  // Se guarda el resultado y se aplican MMR y LP. Cada jugador recibe su LP y su rango
++  // antes y después (el MMR va también, pero el juego no lo enseña: es el número oculto)
++  const res = store.finishMatch(room.matchId, "finished", final);
+   for (const s of final) {
+-    const e = elo[s.id];
+-    if (e) Object.assign(s, { eloBefore: e.before, eloAfter: e.after, eloDelta: e.delta });
++    const r = res[s.id];
++    if (!r) continue;
++    Object.assign(s, {
++      lpDelta: r.lpDelta,
++      rankBefore: r.before,
++      rankAfter: r.after,
++      rankChange: r.change,
++      placement: r.ladderAfter === null ? r.gamesPlayed : null,
++      eloBefore: r.mmrBefore,
++      eloAfter: r.mmrAfter,
++      eloDelta: r.mmrAfter - r.mmrBefore,
++    });
+   }
+   broadcast(room, { t: "finished", matchId: room.matchId, standings: final });
+   // La sala se borra al rato; los resultados ya están en la base de datos
+diff --git a/server/test/partida.test.js b/server/test/partida.test.js
+index 0246ff7..90012c5 100644
+--- a/server/test/partida.test.js
++++ b/server/test/partida.test.js
+@@ -133,10 +133,14 @@ class Client {
+     );
+ 
+     const ranking = await (await fetch(`http://127.0.0.1:${PORT}/api/online/ranking?playerId=${ana.id}`)).json();
+-    assert.strictEqual(ranking.ranking.length, 3);
+-    assert(ranking.ranking.some((r) => r.you && r.name === "Ana"));
+-    assert.strictEqual(ranking.ranking[0].name, first.name, "el ranking va por Elo");
+-    assert.strictEqual(ranking.ranking[0].elo, first.eloAfter);
++    // Primera partida: todos siguen en clasificación (1/5) y no tienen tabla todavía
++    assert.strictEqual(ranking.me.label, "Clasificación 1/5");
++    assert.strictEqual(ranking.table, null);
++    for (const p of fin.standings) {
++      assert.strictEqual(p.placement, 1);
++      assert.strictEqual(p.lpDelta, 0);
++      assert.strictEqual(p.rankAfter, "Clasificación 1/5");
++    }
+     const health = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json();
+     assert(health.ok);
+ 
+diff --git a/server/test/ranked.test.js b/server/test/ranked.test.js
+new file mode 100644
+index 0000000..3ea317d
+--- /dev/null
++++ b/server/test/ranked.test.js
+@@ -0,0 +1,111 @@
++/* Pruebas de la clasificatoria: reparto de LP por puesto, partidas de clasificación,
++   ascensos, Maestro+ y tabla de cada división, con una BD temporal.
++   Uso:  node test/ranked.test.js  */
++const assert = require("assert");
++const path = require("path");
++const os = require("os");
++const fs = require("fs");
++
++process.env.DB_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "donde-ranked-")), "r.db");
++const R = require("../ranked");
++const store = require("../db");
++
++// 1. Pesos por puesto
++const ten = Array.from({ length: 10 }, (_, i) => ({ id: `p${i + 1}`, position: i + 1 }));
++const w10 = R.placementWeights(ten);
++assert.deepStrictEqual(
++  ten.map((p) => w10[p.id]),
++  [1, 0.7, 0.45, 0.25, 0.1, -0.1, -0.25, -0.45, -0.7, -1],
++);
++const w4 = R.placementWeights(ten.slice(0, 4));
++assert.deepStrictEqual([w4.p1, w4.p2, w4.p3, w4.p4], [1, 0.7, -0.7, -1]);
++const w3 = R.placementWeights(ten.slice(0, 3));
++assert.deepStrictEqual([w3.p1, w3.p2, w3.p3], [1, 0, -1]);
++const tie = R.placementWeights([{ id: "a", position: 1 }, { id: "b", position: 1 }]);
++assert.deepStrictEqual([tie.a, tie.b], [0, 0], "empate entre dos: nadie gana ni pierde");
++console.log("✔ reparto por puesto (10, 4, 3 jugadores y empate)");
++
++// 2. Nombres de rango
++assert.strictEqual(R.describe(0).label, "Hierro IV · 0 LP");
++assert.strictEqual(R.describe(1345).label, "Oro III · 45 LP");
++assert.strictEqual(R.describe(2799).label, "Diamante I · 99 LP");
++assert.strictEqual(R.describe(3150).label, "Maestro · 350 LP");
++assert.strictEqual(R.describe(null, 2).label, "Clasificación 2/5");
++console.log("✔ nombres de rango");
++
++// 3. LP en una partida de 10 con todos en Oro IV y MMR acorde (factor 1)
++const gold4 = 1200;
++const mmr = R.rankMmr(gold4);
++const res = R.applyMatch(ten.map((p) => ({ ...p, games: 20, ladder: gold4, mmrBefore: mmr, mmrAfter: mmr })));
++const lps = ten.map((p) => res[p.id].lpDelta);
++console.log("  LP Oro IV, 10 jugadores:", lps.join(" "));
++assert.deepStrictEqual(lps, [25, 18, 11, 6, 3, -3, -6, -11, -18, -25]);
++assert.strictEqual(res.p10.after, "Plata I · 75 LP", "perder en Oro IV con 0 LP baja a Plata I");
++assert.strictEqual(res.p10.change, "demoted");
++
++// MMR por encima del rango: gana más, pierde menos
++const strong = R.applyMatch([
++  { id: "a", position: 1, games: 20, ladder: gold4, mmrBefore: mmr + 200, mmrAfter: mmr + 210 },
++  { id: "b", position: 2, games: 20, ladder: gold4, mmrBefore: mmr + 200, mmrAfter: mmr + 190 },
++]);
++assert(strong.a.lpDelta > 25 && strong.b.lpDelta > -25, "MMR alto: +más / -menos");
++console.log("✔ LP por puesto y corrección por MMR");
++
++// Ascenso de división
++const up = R.applyMatch([
++  { id: "a", position: 1, games: 20, ladder: 1290, mmrBefore: R.rankMmr(1290), mmrAfter: 0 },
++  { id: "b", position: 2, games: 20, ladder: 1290, mmrBefore: R.rankMmr(1290), mmrAfter: 0 },
++]);
++assert.strictEqual(up.a.after, "Oro III · 15 LP");
++assert.strictEqual(up.a.change, "promoted");
++// Suelo en Hierro IV
++const floor = R.applyMatch([
++  { id: "a", position: 1, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
++  { id: "b", position: 2, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
++]);
++assert.strictEqual(floor.b.after, "Hierro IV · 0 LP");
++console.log("✔ ascensos, descensos y suelo en Hierro IV");
++
++// 4. Con la base de datos: 10 jugadores, 6 partidas siempre en el mismo orden
++const ids = ten.map((p) => `jugador-${p.id}-xx`);
++ids.forEach((id, i) => store.savePlayer(id, `J${i + 1}`));
++for (let g = 1; g <= 6; g++) {
++  const matchId = store.createMatch("TEST", "Europa", [{ kind: "country", id: "FRA", name: "Francia" }],
++    ids.map((id, i) => ({ id, name: `J${i + 1}` })));
++  const out = store.finishMatch(matchId, "finished",
++    ids.map((id, i) => ({ id, score: 1000 - i * 50, hits: 10 - i, position: i + 1 })));
++  if (g <= 4) assert.strictEqual(store.rankOf(ids[0]).label, `Clasificación ${g}/5`);
++  if (g === 5) {
++    assert(Object.values(out).every((r) => r.change === "placed"), "tras la 5.ª todos tienen rango");
++    console.log("  Tras la clasificación:", ids.map((id) => store.rankOf(id).label).join(" | "));
++  }
++  if (g === 6) console.log("  Tras la 6.ª:", ids.slice(0, 3).map((id) => `${store.rankOf(id).label} (${out[id].lpDelta >= 0 ? "+" : ""}${out[id].lpDelta})`).join(" | "));
++}
++const best = store.rankOf(ids[0]);
++const worst = store.rankOf(ids[9]);
++assert(best.tier !== "unranked" && worst.tier !== "unranked");
++assert(R.TIERS.findIndex((t) => t.id === best.tier) >= R.TIERS.findIndex((t) => t.id === worst.tier),
++  "el que siempre gana queda igual o por encima");
++
++// La tabla de cada uno solo tiene jugadores de su misma división
++for (const id of [ids[0], ids[5], ids[9]]) {
++  const t = store.divisionTable(id, 50);
++  const mine = store.rankOf(id);
++  assert(t.ranking.some((r) => r.you), "te ves en tu tabla");
++  for (const r of t.ranking) assert(r.lp >= 0 && r.lp <= 99);
++  assert.strictEqual(t.table.key, mine.key);
++  console.log(`  Tabla de ${mine.tierName} ${mine.division}:`, t.ranking.map((r) => `${r.name} ${r.lp}`).join(", "));
++}
++const unranked = "jugador-nuevo-123";
++store.savePlayer(unranked, "Nuevo");
++assert.strictEqual(store.divisionTable(unranked, 50).table, null);
++console.log("✔ clasificación, tablas por división y jugador sin rango");
++
++// 5. Maestro, Gran Maestro y Aspirante
++const apex = R.apexTiers([
++  { id: "x", ladder: 2800 + 900 }, { id: "y", ladder: 2800 + 300 }, { id: "z", ladder: 2800 + 50 },
++]);
++assert.deepStrictEqual(apex, { x: "challenger", y: "grandmaster", z: "master" });
++console.log("✔ Maestro / Gran Maestro / Aspirante");
++
++console.log("\n✅ Clasificatoria correcta");
+diff --git a/www/index.html b/www/index.html
+index f4646a3..a9dc567 100644
+--- a/www/index.html
++++ b/www/index.html
+@@ -114,6 +114,7 @@
+         <h1 id="leaderboard-winner-title" style="display: none; margin-bottom: 10px;">¡Ha ganado Nombre!</h1>
+         <!-- Clasificación de la partida online que acaba de terminar -->
+         <div id="match-standings-box" style="display: none; width: 100%; max-width: 350px;">
++            <div id="match-rank" class="match-rank"></div>
+             <ul id="match-standings" class="leaderboard-list"></ul>
+         </div>
+ 
+@@ -125,7 +126,7 @@
+                 <ul id="leaderboard-list-local" class="leaderboard-list"></ul>
+             </div>
+             <div id="col-online" class="leaderboard-col">
+-                <h3>Online · Elo mundial</h3>
++                <h3 id="online-table-title">Online</h3>
+                 <ul id="leaderboard-list-online" class="leaderboard-list"></ul>
+             </div>
+         </div>
+diff --git a/www/online.js b/www/online.js
+index 3c4ba82..80e2e5b 100644
+--- a/www/online.js
++++ b/www/online.js
+@@ -311,7 +311,7 @@ function renderWaitingRoom() {
+     const name = document.createElement("span");
+     name.textContent =
+       p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
+-      (p.elo ? ` · ${p.elo}` : "");
++      (p.rank ? ` · ${shortRank(p.rank)}` : "");
+     const status = document.createElement("span");
+     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
+     status.className = "room-player-status";
+@@ -497,6 +497,17 @@ function showOnlineFinal() {
+   Online.disconnect();
+ }
+ 
++// "Oro II · 45 LP" → "Oro II" (en la sala de espera no hace falta el LP)
++function shortRank(label) {
++  return String(label).split(" · ")[0];
++}
++
++const RANK_CHANGE_TEXT = {
++  promoted: (r) => `⬆️ ¡Subes a ${shortRank(r)}!`,
++  demoted: (r) => `⬇️ Bajas a ${shortRank(r)}`,
++  placed: (r) => `🎖️ Clasificación terminada: ${shortRank(r)}`,
++};
++
+ function renderMatchStandings(standings) {
+   const list = document.getElementById("match-standings");
+   if (!list) return;
+@@ -506,48 +517,72 @@ function renderMatchStandings(standings) {
+     const left = document.createElement("span");
+     left.textContent = `${s.position}. ${s.name}`;
+     const right = document.createElement("span");
+-    // Puntos de la partida y cómo ha cambiado su Elo
+-    const d = s.eloDelta;
+-    right.textContent = d === undefined
+-      ? `${s.score} pts`
+-      : `${s.score} pts · Elo ${s.eloAfter} (${d >= 0 ? "+" : ""}${d})`;
++    // Puntos de la partida y cómo cambia su rango: +18 LP, o la clasificación 3/5
++    let rank = "";
++    if (s.placement) rank = ` · Clasif. ${s.placement}/5`;
++    else if (s.rankChange === "placed") rank = ` · ${shortRank(s.rankAfter)}`;
++    else if (s.lpDelta !== undefined) rank = ` · ${s.lpDelta >= 0 ? "+" : ""}${s.lpDelta} LP`;
++    right.textContent = `${s.score} pts${rank}`;
+     li.append(left, right);
+     if (s.id === getPlayerId()) li.classList.add("highlight-gold");
+     list.appendChild(li);
+   });
++
++  // Tu rango después de la partida, y si has subido o bajado
++  const me = standings.find((s) => s.id === getPlayerId());
++  const box = document.getElementById("match-rank");
++  if (box) {
++    box.textContent = "";
++    if (me && me.rankAfter) {
++      const line = document.createElement("div");
++      line.className = "match-rank-now";
++      line.textContent = me.rankAfter;
++      box.appendChild(line);
++      const change = RANK_CHANGE_TEXT[me.rankChange];
++      if (change) {
++        const note = document.createElement("div");
++        note.className = `match-rank-change ${me.rankChange}`;
++        note.textContent = change(me.rankAfter);
++        box.appendChild(note);
++      }
++    }
++  }
+   document.getElementById("match-standings-box").style.display = standings.length ? "" : "none";
+ }
+ 
+-/* ---------- Ranking online (desde la base de datos del servidor) ---------- */
++/* ---------- Ranking online: la tabla de TU división ---------- */
+ async function renderOnlineRanking(listEl) {
++  const title = document.getElementById("online-table-title");
+   listEl.innerHTML = "";
+-  const loading = document.createElement("li");
+-  loading.textContent = "Cargando…";
+-  listEl.appendChild(loading);
++  const addLine = (text) => {
++    const li = document.createElement("li");
++    li.textContent = text;
++    listEl.appendChild(li);
++  };
++  addLine("Cargando…");
+   try {
+     const res = await fetch(`${ONLINE_BASE}/api/online/ranking?limit=50&playerId=${encodeURIComponent(getPlayerId())}`);
+-    const { ranking } = await res.json();
++    const { me, table, ranking } = await res.json();
+     listEl.innerHTML = "";
+-    if (!ranking.length) {
+-      const li = document.createElement("li");
+-      li.textContent = "Aún no hay partidas online.";
+-      listEl.appendChild(li);
++    if (title) title.textContent = table ? `Online · ${table.name}` : "Online";
++
++    if (!me || me.tier === "unranked") {
++      const played = me && me.placement ? me.placement.played : 0;
++      addLine(`Juega ${5 - played} partida${5 - played === 1 ? "" : "s"} online más para tener rango (${played}/5).`);
+       return;
+     }
+-    ranking.forEach((r, i) => {
++    ranking.forEach((r) => {
+       const li = document.createElement("li");
+       const left = document.createElement("span");
+-      left.textContent = `${i + 1}. ${r.name}${r.you ? " (tú)" : ""}`;
++      left.textContent = `${r.position}. ${r.name}${r.you ? " (tú)" : ""}`;
+       const right = document.createElement("span");
+-      right.textContent = `${r.elo} Elo · ${r.wins} 🏆 · ${r.games} part.`;
++      right.textContent = `${r.lp} LP · ${r.wins} 🏆`;
+       li.append(left, right); // textContent: un nombre nunca se interpreta como HTML
+       if (r.you) li.classList.add("highlight-gold");
+       listEl.appendChild(li);
+     });
+   } catch {
+     listEl.innerHTML = "";
+-    const li = document.createElement("li");
+-    li.textContent = "No se pudo cargar el ranking online.";
+-    listEl.appendChild(li);
++    addLine("No se pudo cargar el ranking online.");
+   }
+ }
+diff --git a/www/style.css b/www/style.css
+index cd02ffe..2cd8092 100644
+--- a/www/style.css
++++ b/www/style.css
+@@ -717,3 +717,21 @@ input, textarea {
+ .online-results #map-wrapper {
+     height: 32vh;
+ }
++
++/* Rango tras una partida online */
++.match-rank {
++    font-family: Arial, sans-serif;
++    text-align: center;
++    margin: 0 0 6px 0;
++}
++.match-rank-now {
++    color: #E2A342;
++    font-size: 1.15rem;
++    font-weight: bold;
++}
++.match-rank-change {
++    margin-top: 4px;
++    font-size: 1rem;
++}
++.match-rank-change.promoted, .match-rank-change.placed { color: #4ade80; }
++.match-rank-change.demoted { color: #f87171; }
+-- 
+2.43.0
+
