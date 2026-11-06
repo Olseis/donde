@@ -53,6 +53,7 @@ function publicRoom(room) {
   return {
     code: room.code,
     region: room.region,
+    ranked: room.ranked,
     hostId: room.hostId,
     status: room.status,
     round: room.round,
@@ -95,13 +96,16 @@ function clearTimers(room) {
 }
 
 /* ---------- Ciclo de vida de la sala ---------- */
-function createRoom(player, region) {
+// ranked = true: cuenta para la liga y se guarda en la BD.
+// ranked = false (Local): se cuentan los puntos para anunciar al ganador, pero no se guarda nada.
+function createRoom(player, region, ranked) {
   if (!game.REGIONS.includes(region)) throw userError("bad_region", "Región no válida.");
   if (rooms.size >= CFG.MAX_ROOMS) throw userError("full", "El servidor está lleno, prueba en un rato.");
 
   const room = {
     code: newCode(),
     region,
+    ranked: !!ranked,
     hostId: player.id,
     status: "lobby",
     players: new Map(),
@@ -145,9 +149,16 @@ function addPlayer(room, player) {
   return p;
 }
 
-function joinRoom(player, code) {
+function joinRoom(player, code, ranked) {
   const room = rooms.get(String(code || "").toUpperCase().trim());
   if (!room) throw userError("not_found", "No existe ninguna sala con ese código.");
+  // Un código de Ranked no vale desde Local, ni al revés (salvo para volver a tu propia sala)
+  if (typeof ranked === "boolean" && ranked !== room.ranked && !room.players.has(player.id)) {
+    throw userError(
+      "wrong_mode",
+      room.ranked ? "Ese código es de una sala Ranked. Entra desde Ranked." : "Ese código es de una sala Local. Entra desde Local.",
+    );
+  }
   addPlayer(room, player);
   room.lastActivity = Date.now();
   sendRoom(room);
@@ -238,7 +249,8 @@ function startMatch(ws) {
   if (room.targets.length < CFG.ROUNDS)
     throw userError("no_targets", "No hay destinos suficientes en esa región.");
 
-  room.matchId = store.createMatch(room.code, room.region, room.targets, players);
+  // Solo las Ranked se guardan
+  room.matchId = room.ranked ? store.createMatch(room.code, room.region, room.targets, players) : null;
   room.status = "playing";
   room.round = 0;
   sendRoom(room);
@@ -283,7 +295,7 @@ function handleShot(ws, round, heading) {
   p.score += result.points;
   if (result.isHit) p.hits += 1;
 
-  store.saveShot({
+  if (room.ranked) store.saveShot({
     matchId: room.matchId,
     round: room.round,
     playerId: p.id,
@@ -322,7 +334,7 @@ function closeRound(room) {
     if (!room.shots.has(p.id)) {
       const missed = { isHit: false, points: 0, minDistanceKm: null, timedOut: true };
       room.shots.set(p.id, missed);
-      store.saveShot({
+      if (room.ranked) store.saveShot({
         matchId: room.matchId, round: room.round, playerId: p.id,
         heading: null, lng: p.location[0], lat: p.location[1],
         isHit: false, points: 0, distanceKm: null,
@@ -366,7 +378,8 @@ function finish(room) {
   const final = standings(room);
   // Se guarda el resultado y se aplican MMR y LP. Cada jugador recibe su LP y su rango
   // antes y después (el MMR va también, pero el juego no lo enseña: es el número oculto)
-  const res = store.finishMatch(room.matchId, "finished", final);
+  // En Local no se guarda nada: solo se anuncia la clasificación
+  const res = room.ranked ? store.finishMatch(room.matchId, "finished", final) : {};
   for (const s of final) {
     const r = res[s.id];
     if (!r) continue;
@@ -438,13 +451,13 @@ function cancelAbandon(room) {
 module.exports = {
   CFG,
   rooms,
-  createRoom: (player, region) => {
-    const room = createRoom(player, region);
+  createRoom: (player, region, ranked) => {
+    const room = createRoom(player, region, ranked);
     sendRoom(room);
     return room;
   },
-  joinRoom: (player, code) => {
-    const room = joinRoom(player, code);
+  joinRoom: (player, code, ranked) => {
+    const room = joinRoom(player, code, ranked);
     cancelAbandon(room);
     return room;
   },

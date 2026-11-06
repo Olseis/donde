@@ -27,8 +27,12 @@ function customConfirm(message) {
 /* =======================================
    CONFIGURACIÓN
    ======================================= */
-const ROUNDS_PER_GAME = 10;
-const PROGRESS_KEY = "dondeQueda_progress";
+/* TRES MODOS
+   - solo:   Un jugador. Rondas sin fin, sin puntos y sin guardar nada.
+   - local:  Salas con código (cada uno en su móvil). Se cuentan los puntos para
+             anunciar al ganador, pero no se guarda nada.
+   - ranked: Salas con código, con puntos, LP y ligas. Se guarda todo en el servidor.
+   Local y Ranked usan el servidor de partidas (online.js). */
 const LOCATION_KEY = "dondeQueda_savedLocation";
 
 const REGION_NAMES = {
@@ -40,11 +44,6 @@ const REGION_NAMES = {
   Oceanía: "Oceanía",
   España: "España", 
 };
-
-const LEVEL_TITLES = [
-  "Turista", "Mochilero", "Viajero", "Explorador", "Navegante",
-  "Cartógrafo", "Aventurero", "Trotamundos", "Leyenda",
-];
 
 const MARKER_STYLE = {
   radius: 5, fillColor: "#3b82f6", color: "#ffffff", weight: 2, fillOpacity: 1,
@@ -58,7 +57,7 @@ const COUNTRIES_STYLE = {
    ESTADO GLOBAL DEL JUEGO
    ======================================= */
 const state = {
-  gameMode: 'ranked',
+  gameMode: 'solo', // 'solo' | 'local' | 'ranked'
   continent: "Todos",
   mode: 'world',
   userLocation: null,
@@ -70,12 +69,8 @@ const state = {
   countriesGeoJSON: null,
   lastHeading: null,
   totalRotation: 0, 
-  single: { round: 1, score: 0, hits: 0 },
-  players: [
-    { name: "", score: 0, hits: 0 },
-    { name: "", score: 0, hits: 0 },
-  ],
-  currentPlayerIdx: 0,
+  single: { round: 1 },
+  players: [{ name: "", score: 0, hits: 0 }],
   turn: 1,
   selectionMap: null,
   selectionMarker: null,
@@ -92,22 +87,17 @@ const screens = {
   credits: document.getElementById("credits-screen"),
   names: document.getElementById("names-screen"),
   leaderboard: document.getElementById("leaderboard-screen"),
-  progress: document.getElementById("progress-screen"),
   location: document.getElementById("location-screen"),
   game: document.getElementById("game-screen"),
   result: document.getElementById("result-screen"),
-  midgame: document.getElementById("midgame-screen"),
-  summary: document.getElementById("summary-screen"),
   online: document.getElementById("online-screen"),
   waiting: document.getElementById("waiting-screen"),
 };
 
 const UI = {
-  btnModeClassic: document.getElementById("btn-mode-classic"),
-  btnModeRanked: document.getElementById("btn-mode-ranked"),
+  btnModeSolo: document.getElementById("btn-mode-solo"),
   btnModeLocal: document.getElementById("btn-mode-local"),
-  btnModeOnline: document.getElementById("btn-mode-online"),
-  btnShowProgress: document.getElementById("btn-show-progress"),
+  btnModeRanked: document.getElementById("btn-mode-ranked"),
   btnShowScores: document.getElementById("btn-show-scores"),
   btnCredits: document.getElementById("btn-credits-float"),
   btnCreditsBack: document.getElementById("btn-back-credits"),
@@ -119,33 +109,18 @@ const UI = {
 
   namesTitle: document.getElementById("names-title"),
   inputP1: document.getElementById("input-p1"),
-  inputP2: document.getElementById("input-p2"),
   btnConfirmNames: document.getElementById("btn-confirm-names"),
   btnBackNames: document.getElementById("btn-back-names"),
 
   leaderboardWinnerTitle: document.getElementById("leaderboard-winner-title"),
   leaderboardGeneralTitle: document.getElementById("leaderboard-general-title"),
-  leaderboardColLocal: document.getElementById("col-local"),
-  leaderboardColOnline: document.getElementById("col-online"),
-  leaderboardLocal: document.getElementById("leaderboard-list-local"),
+  leaderboardTables: document.getElementById("leaderboard-tables"),
   leaderboardOnline: document.getElementById("leaderboard-list-online"),
   endgameActions: document.getElementById("endgame-actions"),
   standardActions: document.getElementById("standard-actions"),
   btnBackLeaderboard: document.getElementById("btn-back-leaderboard"),
-  btnClearScores: document.getElementById("btn-clear-scores"),
-  btnVersusRestart: document.getElementById("btn-versus-restart"),
   btnVersusNew: document.getElementById("btn-versus-new"),
   btnVersusExit: document.getElementById("btn-versus-exit"),
-
-  progressLevelName: document.getElementById("progress-level-name"),
-  progressLevelFill: document.getElementById("progress-level-fill"),
-  progressLevelText: document.getElementById("progress-level-text"),
-  statGames: document.getElementById("stat-games"),
-  statHits: document.getElementById("stat-hits"),
-  statAccuracy: document.getElementById("stat-accuracy"),
-  recordsList: document.getElementById("records-list"),
-  btnBackProgress: document.getElementById("btn-back-progress"),
-  btnResetProgress: document.getElementById("btn-reset-progress"),
 
   btnConfirmLoc: document.getElementById("btn-confirm-location"),
   btnBackLoc: document.getElementById("btn-back-loc"),
@@ -162,25 +137,6 @@ const UI = {
   resultErrorDetails: document.getElementById("result-error-details"),
   btnRestart: document.getElementById("btn-restart"),
   btnChangeRegion: document.getElementById("btn-change-region"),
-  
-  midgameTitle: document.getElementById("midgame-title"),
-  midgameDiff: document.getElementById("midgame-diff"),
-  midgameList: document.getElementById("midgame-list"),
-  btnMidgameContinue: document.getElementById("btn-midgame-continue"),
-  btnMidgameEnd: document.getElementById("btn-midgame-end"),
-
-  summaryRegion: document.getElementById("summary-region"),
-  summaryScore: document.getElementById("summary-score"),
-  summaryHits: document.getElementById("summary-hits"),
-  summaryRecord: document.getElementById("summary-record"),
-  summaryLevelName: document.getElementById("summary-level-name"),
-  summaryXpGain: document.getElementById("summary-xp-gain"),
-  summaryLevelFill: document.getElementById("summary-level-fill"),
-  summaryLevelText: document.getElementById("summary-level-text"),
-  summaryLevelUp: document.getElementById("summary-level-up"),
-  btnSummaryAgain: document.getElementById("btn-summary-again"),
-  btnSummaryRegion: document.getElementById("btn-summary-region"),
-  btnSummaryMenu: document.getElementById("btn-summary-menu")
 };
 
 /* =======================================
@@ -202,152 +158,13 @@ function saveLocation(loc) {
 }
 
 /* =======================================
-   PROGRESO Y NIVELES
-   ======================================= */
-function emptyProgress() {
-  return { xp: 0, gamesPlayed: 0, totalHits: 0, bestByRegion: {} };
-}
-
-function loadProgress() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
-    if (saved) return { ...emptyProgress(), ...saved };
-  } catch {}
-  return emptyProgress();
-}
-
-function saveProgress(progress) {
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
-}
-
-function xpForLevel(level) {
-  return 250 * level * (level - 1);
-}
-
-function getLevelInfo(xp) {
-  let level = 1;
-  while (xp >= xpForLevel(level + 1)) level++;
-  const base = xpForLevel(level);
-  const next = xpForLevel(level + 1);
-  return {
-    level,
-    title: LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)],
-    xpInLevel: xp - base,
-    xpNeeded: next - base,
-    progress: (xp - base) / (next - base),
-  };
-}
-
-function renderLevelCard(nameEl, fillEl, textEl, info) {
-  if(nameEl) nameEl.textContent = `Nivel ${info.level} · ${info.title}`;
-  if(fillEl) fillEl.style.width = `${Math.round(info.progress * 100)}%`;
-  if(textEl) textEl.textContent = `${info.xpInLevel} / ${info.xpNeeded} XP para el nivel ${info.level + 1}`;
-}
-
-function updateRegionBests() {
-  const progress = loadProgress();
-  document.querySelectorAll(".btn-menu").forEach((btn) => {
-    let span = btn.querySelector(".region-best");
-    if (!span) {
-      span = document.createElement("span");
-      span.className = "region-best";
-      btn.appendChild(span);
-    }
-    const best = progress.bestByRegion[btn.dataset.region];
-    span.textContent = (state.gameMode === 'ranked') && best ? `Récord: ${best.score}` : "";
-    span.style.display = span.textContent ? "" : "none";
-  });
-}
-
-function renderProgressScreen() {
-  const progress = loadProgress();
-  renderLevelCard(UI.progressLevelName, UI.progressLevelFill, UI.progressLevelText, getLevelInfo(progress.xp));
-
-  if(UI.statGames) UI.statGames.textContent = progress.gamesPlayed;
-  if(UI.statHits) UI.statHits.textContent = progress.totalHits;
-  const totalRounds = progress.gamesPlayed * ROUNDS_PER_GAME;
-  if(UI.statAccuracy) UI.statAccuracy.textContent = totalRounds ? `${Math.round((progress.totalHits / totalRounds) * 100)}%` : "0%";
-
-  if(UI.recordsList) {
-    UI.recordsList.innerHTML = "";
-    Object.entries(REGION_NAMES).forEach(([key, name]) => {
-      const best = progress.bestByRegion[key];
-      const li = document.createElement("li");
-      li.innerHTML = best
-        ? `<span>${name}</span><span><b>${best.score}</b> pts · ${best.hits}/${ROUNDS_PER_GAME}</span>`
-        : `<span>${name}</span><span class="record-empty">—</span>`;
-      UI.recordsList.appendChild(li);
-    });
-  }
-}
-
-function animateLevelBar(fillEl, fromProgress, toProgress) {
-  if(!fillEl) return;
-  fillEl.style.transition = "none";
-  fillEl.style.width = `${Math.round(fromProgress * 100)}%`;
-  void fillEl.offsetWidth; 
-  fillEl.style.transition = "";
-  setTimeout(() => { fillEl.style.width = `${Math.round(toProgress * 100)}%`; }, 150);
-}
-
-function finishSingleGame() {
-  const progress = loadProgress();
-  const before = getLevelInfo(progress.xp);
-  const { score, hits } = state.single;
-  const region = state.continent;
-  const prevBest = progress.bestByRegion[region];
-  const isRecord = !prevBest || score > prevBest.score;
-
-  progress.xp += score;
-  progress.gamesPlayed++;
-  progress.totalHits += hits;
-  if (isRecord) {
-    progress.bestByRegion[region] = { score, hits, date: new Date().toISOString() };
-  }
-  saveProgress(progress);
-
-  const after = getLevelInfo(progress.xp);
-
-  if(UI.summaryRegion) UI.summaryRegion.textContent = REGION_NAMES[region];
-  if(UI.summaryScore) UI.summaryScore.textContent = score;
-  if(UI.summaryHits) UI.summaryHits.textContent = `${hits} de ${ROUNDS_PER_GAME} aciertos`;
-
-  if(UI.summaryRecord) {
-    if (!prevBest) {
-      UI.summaryRecord.textContent = "🏅 ¡Primer récord en esta región!";
-    } else if (isRecord) {
-      UI.summaryRecord.textContent = `🏆 ¡Nuevo récord! (antes: ${prevBest.score})`;
-    } else {
-      UI.summaryRecord.textContent = `Tu récord aquí: ${prevBest.score}`;
-    }
-    UI.summaryRecord.classList.toggle("is-record", isRecord);
-  }
-
-  renderLevelCard(UI.summaryLevelName, UI.summaryLevelFill, UI.summaryLevelText, after);
-  if(UI.summaryXpGain) UI.summaryXpGain.textContent = `+${score} XP`;
-
-  const leveledUp = after.level > before.level;
-  animateLevelBar(UI.summaryLevelFill, leveledUp ? 0 : before.progress, after.progress);
-
-  if(UI.summaryLevelUp) {
-    if (leveledUp) {
-      UI.summaryLevelUp.textContent = `⬆️ ¡Subes a nivel ${after.level}: ${after.title}!`;
-      UI.summaryLevelUp.style.display = "";
-    } else {
-      UI.summaryLevelUp.style.display = "none";
-    }
-  }
-
-  showScreen("summary");
-}
-
-function resetSingleGame() {
-  state.single = { round: 1, score: 0, hits: 0 };
-}
-
-/* =======================================
    NAVEGACIÓN Y PANTALLAS
    ======================================= */
+// Local y Ranked juegan en salas del servidor
+function isRoomMode() {
+  return state.gameMode === 'local' || state.gameMode === 'ranked';
+}
+
 function showScreen(screenName) {
   Object.values(screens).forEach((s) => {
       if(s) s.classList.remove("active");
@@ -358,7 +175,7 @@ function showScreen(screenName) {
 }
 
 function returnToMenu() {
-  if (state.gameMode === 'online' && typeof Online !== "undefined") Online.disconnect();
+  if (isRoomMode() && typeof Online !== "undefined") Online.disconnect();
   state.gameMode = null;
   showScreen("start");
 }
@@ -367,18 +184,12 @@ const goToRegionSelect = () => {
   if(UI.menuContainer) UI.menuContainer.style.display = "grid";
   if(UI.startLoading) UI.startLoading.style.display = "none";
   if(UI.btnBackRegion) UI.btnBackRegion.style.display = "";
-  
-  if (state.gameMode === 'local') {
-      if(UI.regionSubtitle) UI.regionSubtitle.textContent = `Local: ${state.players[0].name} vs ${state.players[1].name}`;
-  } else if (state.gameMode === 'online') {
-      if(UI.regionSubtitle) UI.regionSubtitle.textContent = `Online: ${state.players[0].name}`;
-  } else if (state.gameMode === 'ranked') {
-      if(UI.regionSubtitle) UI.regionSubtitle.textContent = `Ranked · ${ROUNDS_PER_GAME} rondas`;
-  } else {
-      if(UI.regionSubtitle) UI.regionSubtitle.textContent = `Clásico · Infinito`;
+  if(UI.regionSubtitle) {
+    UI.regionSubtitle.textContent =
+      state.gameMode === 'ranked' ? "Ranked · nueva sala" :
+      state.gameMode === 'local' ? "Local · nueva sala" :
+      "Un jugador";
   }
-  
-  updateRegionBests();
   showScreen("region");
 }
 
@@ -389,93 +200,53 @@ if (typeof window.Capacitor !== "undefined" && window.Capacitor.Plugins && windo
     window.Capacitor.Plugins.App.addListener('backButton', async () => {
         const activeScreen = document.querySelector('.screen.active');
         if (!activeScreen) return;
-
         const activeId = activeScreen.id;
 
-        // 1. Si estamos en el menú principal, se cierra la app nativamente
+        // 1. En el menú principal se cierra la app
         if (activeId === 'start-screen') {
             window.Capacitor.Plugins.App.exitApp();
-        } 
-        // 2. Si estamos en mitad de una partida (salvo modo libre), pide confirmación con modal personalizado
-        else if (['game-screen', 'result-screen', 'midgame-screen', 'location-screen'].includes(activeId)) {
-            if (state.gameMode === 'classic' || activeId === 'location-screen') {
-                returnToMenu();
-            } else {
-                const wantsToExit = await customConfirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.");
-                if (wantsToExit) {
-                    returnToMenu();
-                }
-            }
-        } 
-        // 3. En cualquier otra pantalla, vuelve directo al inicio
+        }
+        // 2. En mitad de una partida de sala, se pide confirmación
+        else if (isRoomMode() && ['game-screen', 'result-screen', 'waiting-screen'].includes(activeId)) {
+            if (await customConfirm("¿Seguro que quieres abandonar la partida?")) returnToMenu();
+        }
+        // 3. En cualquier otra pantalla, vuelve al inicio
         else {
             returnToMenu();
         }
     });
 }
 
-// Botones Modo
-if(UI.btnModeClassic) UI.btnModeClassic.addEventListener("click", () => { state.gameMode = 'classic'; goToRegionSelect(); });
-if(UI.btnModeRanked) UI.btnModeRanked.addEventListener("click", () => { state.gameMode = 'ranked'; goToRegionSelect(); });
-if(UI.btnModeLocal) UI.btnModeLocal.addEventListener("click", () => {
-  state.gameMode = 'local';
-  if(UI.namesTitle) UI.namesTitle.textContent = "Nombres de los Jugadores";
-  if(UI.inputP2) UI.inputP2.style.display = "block";
-  if(UI.inputP1) UI.inputP1.value = "";
-  if(UI.inputP2) UI.inputP2.value = "";
-  showScreen("names");
-});
-if(UI.btnModeOnline) UI.btnModeOnline.addEventListener("click", () => {
-  state.gameMode = 'online';
-  if(UI.namesTitle) UI.namesTitle.textContent = "Tu Nombre (Online)";
-  if(UI.inputP2) UI.inputP2.style.display = "none";
-  const savedName = localStorage.getItem("dondeQueda_onlineName") || "";
-  if(UI.inputP1) UI.inputP1.value = savedName;
-  showScreen("names");
-});
+// Botones de modo
+if(UI.btnModeSolo) UI.btnModeSolo.addEventListener("click", () => { state.gameMode = 'solo'; goToRegionSelect(); });
 
-if(UI.btnShowProgress) UI.btnShowProgress.addEventListener("click", () => { renderProgressScreen(); showScreen("progress"); });
+function askNameForRoom(mode) {
+  state.gameMode = mode;
+  if(UI.namesTitle) UI.namesTitle.textContent = mode === 'ranked' ? "Ranked · tu nombre" : "Local · tu nombre";
+  if(UI.inputP1) UI.inputP1.value = localStorage.getItem("dondeQueda_onlineName") || "";
+  showScreen("names");
+}
+if(UI.btnModeLocal) UI.btnModeLocal.addEventListener("click", () => askNameForRoom('local'));
+if(UI.btnModeRanked) UI.btnModeRanked.addEventListener("click", () => askNameForRoom('ranked'));
+
 if(UI.btnShowScores) UI.btnShowScores.addEventListener("click", () => { renderLeaderboard(false); showScreen("leaderboard"); });
 if(UI.btnCredits) UI.btnCredits.addEventListener("click", () => showScreen("credits"));
 if(UI.btnCreditsBack) UI.btnCreditsBack.addEventListener("click", returnToMenu);
-if(UI.btnBackProgress) UI.btnBackProgress.addEventListener("click", returnToMenu);
-
-if(UI.btnResetProgress) UI.btnResetProgress.addEventListener("click", async () => {
-  const confirmed = await customConfirm("¿Seguro que quieres borrar tu progreso? Perderás tu nivel y tus récords.");
-  if (confirmed) {
-    localStorage.removeItem(PROGRESS_KEY);
-    renderProgressScreen();
-  }
-});
 
 if(UI.btnConfirmNames) UI.btnConfirmNames.addEventListener("click", () => {
-  const p1 = (UI.inputP1 ? UI.inputP1.value.trim() : "") || "Jugador 1";
-  if (state.gameMode === 'local') {
-      const p2 = (UI.inputP2 ? UI.inputP2.value.trim() : "") || "Jugador 2";
-      if (p1.toLowerCase() === p2.toLowerCase()) {
-          alert("Los nombres no pueden ser iguales.");
-          if(UI.inputP2) UI.inputP2.focus();
-          return;
-      }
-      state.players = [{ name: p1, score: 0, hits: 0 }, { name: p2, score: 0, hits: 0 }];
-  } else if (state.gameMode === 'online') {
-      if (!/^[\p{L}\p{N} _.\-]{1,20}$/u.test(p1)) {
-          alert("Escribe un nombre de 1 a 20 letras o números.");
-          if(UI.inputP1) UI.inputP1.focus();
-          return;
-      }
-      state.currentPlayerIdx = 0; state.turn = 1;
-      openOnlineLobby(p1); // online.js: crear sala o unirse con código
+  const name = UI.inputP1 ? UI.inputP1.value.trim() : "";
+  if (!/^[\p{L}\p{N} _.\-]{1,20}$/u.test(name)) {
+      alert("Escribe un nombre de 1 a 20 letras o números.");
+      if(UI.inputP1) UI.inputP1.focus();
       return;
   }
-  state.currentPlayerIdx = 0; state.turn = 1;
-  goToRegionSelect();
+  state.turn = 1;
+  openOnlineLobby(name); // online.js: crear sala o unirse con código
 });
 
 if(UI.btnBackNames) UI.btnBackNames.addEventListener("click", returnToMenu);
 if(UI.btnBackRegion) UI.btnBackRegion.addEventListener("click", () => {
-  if (state.gameMode === 'online') showScreen("online");
-  else if (state.gameMode === 'local') showScreen("names"); 
+  if (isRoomMode()) showScreen("online");
   else returnToMenu();
 });
 
@@ -486,8 +257,8 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
 
     state.continent = region;
 
-    // Online: la sala se crea en el servidor y él nos lleva a elegir ubicación (online.js)
-    if (state.gameMode === 'online') {
+    // Salas: se crea en el servidor y él nos lleva a elegir ubicación (online.js)
+    if (isRoomMode()) {
       if(UI.regionSubtitle) UI.regionSubtitle.textContent = "Creando sala...";
       Online.createRoom(region).catch(() => {
         alert("No se pudo conectar con el servidor.");
@@ -496,13 +267,7 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
       return;
     }
 
-    if (state.gameMode === 'local') {
-      state.players.forEach((p) => { p.score = 0; p.hits = 0; });
-      state.currentPlayerIdx = 0; state.turn = 1;
-    } else {
-      resetSingleGame();
-    }
-
+    state.single = { round: 1 };
     if (region === "España") {
         state.mode = 'spain';
         prepareLocationScreen();
@@ -538,77 +303,20 @@ async function loadAssetsAndPrepareLoc() {
 
 if(UI.btnBackLeaderboard) UI.btnBackLeaderboard.addEventListener("click", returnToMenu);
 if(UI.btnVersusExit) UI.btnVersusExit.addEventListener("click", returnToMenu);
+// "Nueva partida" al acabar una sala: vuelve a crear/unirse con el mismo nombre y modo
 if(UI.btnVersusNew) UI.btnVersusNew.addEventListener("click", () => {
-    if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names");
+  if (isRoomMode()) openOnlineLobby(Online.name || localStorage.getItem("dondeQueda_onlineName") || "");
 });
 
 if(UI.btnBackLoc) UI.btnBackLoc.addEventListener("click", () => {
-  if (state.gameMode === 'online') { Online.leaveRoom(); showScreen("online"); }
+  if (isRoomMode()) { Online.leaveRoom(); showScreen("online"); }
   else goToRegionSelect();
 });
 
 if(UI.btnChangeRegion) UI.btnChangeRegion.addEventListener("click", async () => {
-  if (state.gameMode === 'classic') { goToRegionSelect(); return; }
-  
-  const confirmed = await customConfirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.");
-  if (confirmed) {
-    if (state.gameMode === 'local' || state.gameMode === 'online') returnToMenu(); else goToRegionSelect();
-  }
+  if (!isRoomMode()) { goToRegionSelect(); return; }
+  if (await customConfirm("¿Seguro que quieres abandonar la partida?")) returnToMenu();
 });
-
-function showMidgameScreen() {
-    const p1 = state.players[0], p2 = state.players[1];
-    let diff = Math.abs(p1.score - p2.score);
-    
-    if(UI.midgameTitle) {
-        if (p1.score > p2.score) UI.midgameTitle.textContent = `¡${p1.name} va ganando!`;
-        else if (p2.score > p1.score) UI.midgameTitle.textContent = `¡${p2.name} va ganando!`;
-        else UI.midgameTitle.textContent = `¡Están empatados!`;
-    }
-    if(UI.midgameDiff) UI.midgameDiff.textContent = `Diferencia: ${diff} pts`;
-    
-    if(UI.midgameList) {
-        UI.midgameList.innerHTML = "";
-        let sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
-        let rounds = 3; 
-
-        sortedPlayers.forEach((p, index) => {
-            let accuracy = Math.round((p.hits / rounds) * 100) || 0;
-            let li = document.createElement("li");
-            // Se usa display:flex en columna para que quede bien alineado a la derecha sin solaparse
-            li.innerHTML = `
-                <span>${index + 1}. ${p.name}</span>
-                <div style="text-align: right; display: flex; flex-direction: column;">
-                    <span>${p.score} pts</span>
-                    <span style="font-size: 0.85rem; color: #94a3b8; margin-top: 2px;">${p.hits}/${rounds} aciertos (${accuracy}%)</span>
-                </div>
-            `;
-            if (index === 0 && sortedPlayers[0].score !== sortedPlayers[1].score) li.classList.add("highlight-gold");
-            UI.midgameList.appendChild(li);
-        });
-    }
-    showScreen("midgame");
-}
-
-if(UI.btnMidgameContinue) UI.btnMidgameContinue.addEventListener("click", () => {
-    state.turn++; state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2; startNewRound();
-});
-if(UI.btnMidgameEnd) UI.btnMidgameEnd.addEventListener("click", endLocalGame);
-
-function endLocalGame() {
-    const p1 = state.players[0], p2 = state.players[1];
-    if(UI.leaderboardWinnerTitle) {
-        if (p1.score > p2.score) UI.leaderboardWinnerTitle.textContent = `¡Ha ganado ${p1.name}!`;
-        else if (p2.score > p1.score) UI.leaderboardWinnerTitle.textContent = `¡Ha ganado ${p2.name}!`;
-        else UI.leaderboardWinnerTitle.textContent = `¡Habéis empatado!`;
-        UI.leaderboardWinnerTitle.style.display = "block";
-    }
-    saveScores('local'); renderLeaderboard(true); showScreen("leaderboard");
-}
-
-if(UI.btnSummaryAgain) UI.btnSummaryAgain.addEventListener("click", () => { resetSingleGame(); startNewRound(); });
-if(UI.btnSummaryRegion) UI.btnSummaryRegion.addEventListener("click", goToRegionSelect);
-if(UI.btnSummaryMenu) UI.btnSummaryMenu.addEventListener("click", returnToMenu);
 
 /* =======================================
    PREPARACIÓN Y SELECCIÓN DE UBICACIÓN
@@ -696,8 +404,8 @@ async function initializeGameSession(source) {
     startCompass();
     if(UI.locLoading) UI.locLoading.style.display = "none";
 
-    // Online: no se empieza todavía; se avisa al servidor y se espera al resto
-    if (state.gameMode === 'online') {
+    // Salas: no se empieza todavía; se avisa al servidor y se espera al resto
+    if (isRoomMode()) {
       Online.sendLocation(state.userLocation);
       showScreen("waiting");
       return;
@@ -781,33 +489,14 @@ function handleOrientation(event) {
 /* =======================================
    LÓGICA DEL JUEGO
    ======================================= */
+// Solo para el modo Un jugador: en las salas, las rondas las manda el servidor
 function startNewRound() {
-  if (state.gameMode === 'online') return; // en online las rondas las manda el servidor
+  if (isRoomMode()) return;
   showScreen("game");
   if(UI.resultErrorDetails) UI.resultErrorDetails.style.display = "none";
   if(UI.turnPointsDisplay) UI.turnPointsDisplay.style.display = "none";
-
-  if (state.gameMode === 'local') {
-    const player = state.players[state.currentPlayerIdx];
-    if(UI.currentPlayerDisplay) {
-        UI.currentPlayerDisplay.textContent = `Turno de ${player.name}`;
-        UI.currentPlayerDisplay.style.display = "block";
-    }
-    if(UI.roundInfo) UI.roundInfo.textContent = `Turno ${Math.ceil(state.turn / 2)} de 5 · ${player.score} pts`;
-  } else if (state.gameMode === 'online') {
-    const player = state.players[0];
-    if(UI.currentPlayerDisplay) {
-        UI.currentPlayerDisplay.textContent = player.name;
-        UI.currentPlayerDisplay.style.display = "block";
-    }
-    if(UI.roundInfo) UI.roundInfo.textContent = `Ronda ${state.turn} de 10 · ${player.score} pts`;
-  } else if (state.gameMode === 'ranked') {
-    if(UI.currentPlayerDisplay) UI.currentPlayerDisplay.style.display = "none";
-    if(UI.roundInfo) UI.roundInfo.textContent = `Ronda ${state.single.round} de ${ROUNDS_PER_GAME} · ${state.single.score} pts`;
-  } else if (state.gameMode === 'classic') {
-    if(UI.currentPlayerDisplay) UI.currentPlayerDisplay.style.display = "none";
-    if(UI.roundInfo) UI.roundInfo.textContent = `Modo Libre · Ronda ${state.single.round}`;
-  }
+  if(UI.currentPlayerDisplay) UI.currentPlayerDisplay.style.display = "none";
+  if(UI.roundInfo) UI.roundInfo.textContent = `Ronda ${state.single.round}`;
 
   const previousId = state.targetData ? (state.mode === 'spain' ? state.targetData.name : state.targetData.id) : null;
 
@@ -858,7 +547,7 @@ if (btnConfirmGame) {
     btnConfirmGame.addEventListener("click", () => {
       showScreen("result");
 
-      // El cálculo está en shot.js, el mismo archivo que usa el servidor en las partidas online
+      // El cálculo está en shot.js, el mismo archivo que usa el servidor en las salas
       const shot = DondeShot.judgeShot({
         turf,
         userLocation: state.userLocation,
@@ -869,8 +558,6 @@ if (btnConfirmGame) {
       const isHit = shot.isHit;
       if (state.mode === 'spain') state.targetData.polygonGeometry = shot.targetGeometry;
       state.lastShot = shot; // el mapa del resultado dibuja la zona de acierto
-
-      let turnPoints = state.gameMode === 'classic' ? 0 : shot.points;
 
       if(UI.resultTitle) {
           if (isHit) {
@@ -887,29 +574,12 @@ if (btnConfirmGame) {
           }
       }
 
-      if(UI.turnPointsDisplay) {
-          if (state.gameMode === 'classic') {
-            UI.turnPointsDisplay.style.display = "none";
-          } else {
-            UI.turnPointsDisplay.textContent = pointsText(shot, turnPoints);
-            UI.turnPointsDisplay.style.display = "block";
-          }
-      }
-
-      if (state.gameMode === 'local') {
-        state.players[state.currentPlayerIdx].score += turnPoints;
-        if (isHit) state.players[state.currentPlayerIdx].hits++;
-        if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
-        else if (state.turn === 6) UI.btnRestart.textContent = "Ver Marcador";
-        else UI.btnRestart.textContent = "Siguiente Turno";
-      } else if (state.gameMode === 'online') {
+      if (isRoomMode()) {
         // Solo se manda el rumbo: el servidor decide los puntos (online.js)
         onlineShot(state.currentHeading);
-      } else if (state.gameMode === 'ranked') {
-        state.single.score += turnPoints;
-        if (isHit) state.single.hits++;
-        if(UI.btnRestart) UI.btnRestart.textContent = state.single.round >= ROUNDS_PER_GAME ? "Ver resultado" : "Siguiente ronda";
-      } else if (state.gameMode === 'classic') {
+      } else {
+        // Un jugador: sin puntos
+        if(UI.turnPointsDisplay) UI.turnPointsDisplay.style.display = "none";
         if(UI.btnRestart) UI.btnRestart.textContent = "Siguiente ronda";
       }
 
@@ -918,165 +588,34 @@ if (btnConfirmGame) {
 }
 
 if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
-  if (state.gameMode === 'local') {
-    if (state.turn === 6) showMidgameScreen();
-    else if (state.turn >= 10) endLocalGame();
-    else { state.turn++; state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2; startNewRound(); }
-  } else if (state.gameMode === 'online') {
-    onlineNext();
-  } else if (state.gameMode === 'ranked') {
-    if (state.single.round >= ROUNDS_PER_GAME) finishSingleGame();
-    else { state.single.round++; startNewRound(); }
-  } else if (state.gameMode === 'classic') {
-    state.single.round++; startNewRound();
-  }
+  if (isRoomMode()) onlineNext();
+  else { state.single.round++; startNewRound(); }
 });
 
 /* =======================================
-   LEADERBOARD Y PUNTUACIONES 
+   TABLA RANKING
+   Solo hay ranking en Ranked: la tabla de tu división, que viene del servidor.
+   Al acabar una sala Local se enseña quién ha ganado, pero no se guarda nada.
    ======================================= */
-/* Ranking local por Elo (elo.js). Se guarda en el móvil:
-   dondeQueda_elo_local = { "Nombre": { elo, games, wins, best } }
-   Los nombres del ranking antiguo (mejor puntuación) se conservan con 1000 de Elo. */
-const LOCAL_ELO_KEY = "dondeQueda_elo_local";
-const OLD_LOCAL_KEY = "dondeQueda_scores_local";
-
-function loadLocalElo() {
-  let table = null;
-  try { table = JSON.parse(localStorage.getItem(LOCAL_ELO_KEY)); } catch {}
-  if (table) return table;
-  table = {};
-  try {
-    const old = JSON.parse(localStorage.getItem(OLD_LOCAL_KEY)) || {};
-    Object.entries(old).forEach(([name, best]) => {
-      table[name] = { elo: DondeElo.START, games: 0, wins: 0, best: best || 0 };
-    });
-  } catch {}
-  return table;
-}
-
-// Busca el nombre sin distinguir mayúsculas, para no duplicar a "ana" y "Ana"
-function localEloKey(table, name) {
-  return Object.keys(table).find((k) => k.toLowerCase() === name.toLowerCase()) || name;
-}
-
-function saveScores(type) {
-  if (type !== 'local') return;
-  const table = loadLocalElo();
-  const players = state.players.filter((p) => p.name.trim());
-  // Puesto de cada uno: más puntos gana; a igualdad, más aciertos; si no, empate
-  const ranked = players.map((p) => ({ p, key: localEloKey(table, p.name.trim()) }));
-  ranked.forEach((r) => {
-    r.position = 1 + ranked.filter((o) => o.p.score > r.p.score || (o.p.score === r.p.score && o.p.hits > r.p.hits)).length;
-    if (!table[r.key]) table[r.key] = { elo: DondeElo.START, games: 0, wins: 0, best: 0 };
-  });
-  const result = DondeElo.rateMatch(ranked.map((r) => ({
-    id: r.key, rating: table[r.key].elo, games: table[r.key].games, position: r.position,
-  })));
-  state.lastEloDeltas = {};
-  result.forEach((res) => {
-    const r = ranked.find((x) => x.key === res.id);
-    const row = table[res.id];
-    row.elo = res.after;
-    row.games += 1;
-    if (r.position === 1 && ranked.some((o) => o.position > 1)) row.wins += 1;
-    row.best = Math.max(row.best || 0, r.p.score);
-    state.lastEloDeltas[res.id.toLowerCase()] = res.delta;
-  });
-  localStorage.setItem(LOCAL_ELO_KEY, JSON.stringify(table));
-}
-
 function renderLeaderboard(isEndGame = false) {
-  if(UI.leaderboardLocal) UI.leaderboardLocal.innerHTML = "";
-  if(UI.leaderboardOnline) UI.leaderboardOnline.innerHTML = "";
+  const isRankedEnd = isEndGame && state.gameMode === 'ranked';
+  const isLocalEnd = isEndGame && state.gameMode === 'local';
 
-  if (!isEndGame) {
-      if(UI.leaderboardWinnerTitle) UI.leaderboardWinnerTitle.style.display = "none";
-      if(UI.leaderboardColLocal) UI.leaderboardColLocal.style.display = "flex";
-      if(UI.leaderboardColOnline) UI.leaderboardColOnline.style.display = "flex";
-      if(UI.leaderboardGeneralTitle) UI.leaderboardGeneralTitle.style.marginTop = "0";
-  } else {
-      if (state.gameMode === 'local') {
-          if(UI.leaderboardColLocal) UI.leaderboardColLocal.style.display = "flex";
-          if(UI.leaderboardColOnline) UI.leaderboardColOnline.style.display = "none";
-          if(UI.leaderboardGeneralTitle) UI.leaderboardGeneralTitle.style.marginTop = "10px";
-      } else if (state.gameMode === 'online') {
-          if(UI.leaderboardColLocal) UI.leaderboardColLocal.style.display = "none";
-          if(UI.leaderboardColOnline) UI.leaderboardColOnline.style.display = "flex";
-          if(UI.leaderboardGeneralTitle) UI.leaderboardGeneralTitle.style.marginTop = "0";
-      }
-  }
+  if (!isEndGame && UI.leaderboardWinnerTitle) UI.leaderboardWinnerTitle.style.display = "none";
 
-  // Ranking local: ordenado por Elo
-  const renderLocalElo = (listEl) => {
-      if(!listEl) return null;
-      const table = loadLocalElo();
-      const sorted = Object.entries(table).sort((a, b) => b[1].elo - a[1].elo || b[1].wins - a[1].wins);
-      let lowestHighlightedNode = null;
+  // La tabla de la división solo se ve desde el menú o al acabar una Ranked
+  if (UI.leaderboardTables) UI.leaderboardTables.style.display = isLocalEnd ? "none" : "";
+  if (UI.leaderboardGeneralTitle) UI.leaderboardGeneralTitle.style.display = isLocalEnd ? "none" : "";
+  if (UI.leaderboardOnline && !isLocalEnd) renderOnlineRanking(UI.leaderboardOnline);
 
-      sorted.forEach(([name, row], index) => {
-          const li = document.createElement("li");
-          const left = document.createElement("span");
-          left.textContent = `${index + 1}. ${name}`;
-          const right = document.createElement("div");
-          right.style.cssText = "text-align: right; display: flex; flex-direction: column;";
-          const main = document.createElement("span");
-          main.textContent = `${row.elo} Elo · ${row.wins} 🏆`;
-          right.appendChild(main);
-
-          const player = isEndGame && state.gameMode === 'local'
-              ? state.players.find((p) => p.name.trim().toLowerCase() === name.toLowerCase())
-              : null;
-          if (player) {
-              li.classList.add("highlight-gold");
-              lowestHighlightedNode = li;
-              const delta = (state.lastEloDeltas || {})[name.toLowerCase()] || 0;
-              const rounds = Math.max(1, Math.floor(state.turn / 2));
-              const accuracy = Math.round((player.hits / rounds) * 100) || 0;
-              const extra = document.createElement("span");
-              extra.style.cssText = "font-size: 0.85rem; color: #94a3b8; margin-top: 2px;";
-              extra.textContent = `${delta >= 0 ? "+" : ""}${delta} Elo · ${player.score} pts · ${player.hits}/${rounds} aciertos (${accuracy}%)`;
-              right.appendChild(extra);
-          }
-          li.append(left, right); // textContent: los nombres nunca se interpretan como HTML
-          listEl.appendChild(li);
-      });
-      return lowestHighlightedNode;
-  };
-
-  const nodeLocal = renderLocalElo(UI.leaderboardLocal);
-  // El ranking online sale de la base de datos del servidor (online.js)
-  if (UI.leaderboardOnline) renderOnlineRanking(UI.leaderboardOnline);
-
-  const isOnlineEnd = isEndGame && state.gameMode === 'online';
   const standingsBox = document.getElementById("match-standings-box");
-  if (standingsBox && !isOnlineEnd) standingsBox.style.display = "none";
-  if (UI.btnVersusRestart) UI.btnVersusRestart.style.display = isOnlineEnd ? "none" : "";
+  if (standingsBox && !isEndGame) standingsBox.style.display = "none";
+  const rankBox = document.getElementById("match-rank");
+  if (rankBox) rankBox.style.display = isRankedEnd ? "" : "none";
 
-  if (isEndGame) {
-    if(UI.endgameActions) UI.endgameActions.style.display = "block";
-    if(UI.standardActions) UI.standardActions.style.display = "none";
-    if (nodeLocal && state.gameMode === 'local') { setTimeout(() => { nodeLocal.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 200); }
-  } else {
-    if(UI.endgameActions) UI.endgameActions.style.display = "none";
-    if(UI.standardActions) UI.standardActions.style.display = "block";
-  }
+  if(UI.endgameActions) UI.endgameActions.style.display = isEndGame ? "block" : "none";
+  if(UI.standardActions) UI.standardActions.style.display = isEndGame ? "none" : "block";
 }
-
-if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", async () => {
-  const confirmed = await customConfirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.");
-  if (confirmed) {
-    localStorage.removeItem(LOCAL_ELO_KEY);
-    localStorage.removeItem(OLD_LOCAL_KEY);
-    renderLeaderboard(false);
-  }
-});
-
-if(UI.btnVersusRestart) UI.btnVersusRestart.addEventListener("click", () => {
-  state.turn = 1; state.currentPlayerIdx = 0;
-  state.players.forEach(p => { p.score = 0; p.hits = 0; });
-  startNewRound();
-});
 
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS

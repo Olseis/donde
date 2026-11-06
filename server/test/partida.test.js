@@ -65,13 +65,16 @@ class Client {
     raro.send({ t: "hello", playerId: "test-raro-123456", name: "<script>" });
     assert.strictEqual((await raro.waitT("error")).code, "bad_name");
 
-    ana.send({ t: "create", region: "Europa" });
+    ana.send({ t: "create", region: "Europa", ranked: true });
     const { room } = await ana.waitT("room");
     assert.match(room.code, /^[A-Z2-9]{4}$/);
     console.log("Sala creada:", room.code);
 
-    beto.send({ t: "join", code: room.code.toLowerCase() }); // el código no distingue mayúsculas
-    cris.send({ t: "join", code: room.code });
+    // Un código de Ranked no vale desde Local
+    beto.send({ t: "join", code: room.code, ranked: false });
+    assert.strictEqual((await beto.waitT("error")).code, "wrong_mode");
+    beto.send({ t: "join", code: room.code.toLowerCase(), ranked: true }); // el código no distingue mayúsculas
+    cris.send({ t: "join", code: room.code, ranked: true });
     await ana.waitT("room", (m) => m.room.players.length === 3);
 
     // Beto intenta empezar sin ser anfitrión
@@ -148,7 +151,7 @@ class Client {
     const ana2 = new Client("Ana2"), beto2 = new Client("Beto2");
     await Promise.all([ana2.open, beto2.open]);
     for (const c of [ana2, beto2]) { c.send({ t: "hello", playerId: c.id, name: c.name }); await c.waitT("welcome"); }
-    ana2.send({ t: "create", region: "España" });
+    ana2.send({ t: "create", region: "España", ranked: false }); // sala Local
     const sala2 = (await ana2.waitT("room")).room.code;
     beto2.send({ t: "join", code: sala2 });
     ana2.send({ t: "location", location: [-6.3437, 38.9161] }); // Mérida
@@ -163,6 +166,24 @@ class Client {
     const beto2Res = res2.results.find((r) => r.name === "Beto2");
     assert(beto2Res.timedOut && beto2Res.points === 0, "quien se va se lleva 0 en esa ronda");
     console.log("Desconexión a mitad de ronda: la partida sigue ✔");
+
+    // La sala Local cuenta puntos pero no guarda nada
+    const r1Points = res2.results.find((r) => r.name === "Ana2").points;
+    assert(typeof r1Points === "number", "en Local también hay puntos para saber quién gana");
+    ana2.send({ t: "next", round: 1 });
+    for (let r = 2; r <= 10; r++) {
+      await ana2.waitT("round", (m) => m.round === r);
+      ana2.send({ t: "shot", round: r, heading: 10 });
+      await ana2.waitT("roundResult", (m) => m.round === r);
+      if (r < 10) ana2.send({ t: "next", round: r });
+    }
+    const fin2 = await ana2.waitT("finished");
+    assert.strictEqual(fin2.matchId, null, "Local: no hay partida en la BD");
+    assert(fin2.standings.every((p) => p.lpDelta === undefined), "Local: sin LP");
+    const dbl = require("better-sqlite3")(DB, { readonly: true });
+    assert.strictEqual(dbl.prepare("SELECT COUNT(*) n FROM matches").get().n, 1, "solo se guardó la Ranked");
+    assert.strictEqual(dbl.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(ana2.id).n, 0);
+    console.log("Sala Local: ganador anunciado, nada guardado ✔");
 
     console.log("\n✅ Todas las comprobaciones han pasado");
     process.exitCode = 0;

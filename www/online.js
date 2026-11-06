@@ -74,7 +74,7 @@ const Online = {
         if (msg.t === "welcome") {
           resolve();
           // Si se cortó la conexión estando en una sala, volvemos a entrar
-          if (this.room) this.send({ t: "join", code: this.room.code });
+          if (this.room) this.send({ t: "join", code: this.room.code, ranked: this.room.ranked });
         }
         this.handle(msg);
       };
@@ -119,13 +119,14 @@ const Online = {
   async createRoom(region) {
     this.pending = "create";
     await this.connect();
-    this.send({ t: "create", region });
+    // Local = sala por diversión; Ranked = cuenta para la liga
+    this.send({ t: "create", region, ranked: state.gameMode === "ranked" });
   },
 
   async joinRoom(code) {
     this.pending = "join";
     await this.connect();
-    this.send({ t: "join", code });
+    this.send({ t: "join", code, ranked: state.gameMode === "ranked" });
   },
 
   // Salir de la sala sin cerrar la conexión (p. ej. "Volver" desde la ubicación)
@@ -261,8 +262,16 @@ function setOnlineStatus(text) {
   if (OUI.status) OUI.status.textContent = text || "";
 }
 
-// Pantalla "Online": crear sala o unirse con código
+// Pantalla de sala (Local o Ranked): crear sala o unirse con código
 function openOnlineLobby(name) {
+  const title = document.getElementById("online-title");
+  if (title) title.textContent = state.gameMode === "ranked" ? "Ranked" : "Local";
+  const hint = document.getElementById("online-mode-hint");
+  if (hint) {
+    hint.textContent = state.gameMode === "ranked"
+      ? "Cuenta para tu liga: ganas o pierdes LP según tu puesto."
+      : "Por diversión: se anuncia al ganador, pero no se guarda nada.";
+  }
   Online.name = name;
   localStorage.setItem(ONLINE_NAME_KEY, name);
   state.players = [{ name, score: 0, hits: 0 }];
@@ -311,7 +320,7 @@ function renderWaitingRoom() {
     const name = document.createElement("span");
     name.textContent =
       p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
-      (p.rank ? ` · ${shortRank(p.rank)}` : "");
+      (room.ranked && p.rank ? ` · ${shortRank(p.rank)}` : "");
     const status = document.createElement("span");
     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
     status.className = "room-player-status";
@@ -564,7 +573,7 @@ async function renderOnlineRanking(listEl) {
     const res = await fetch(`${ONLINE_BASE}/api/online/ranking?limit=50&playerId=${encodeURIComponent(getPlayerId())}`);
     const { me, table, ranking } = await res.json();
     listEl.innerHTML = "";
-    if (title) title.textContent = table ? `Online · ${table.name}` : "Online";
+    if (title) title.textContent = table ? `Ranked · ${table.name}` : "Ranked";
 
     if (!me || me.tier === "unranked") {
       const played = me && me.placement ? me.placement.played : 0;

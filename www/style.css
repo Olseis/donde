@@ -735,3 +735,31 @@ input, textarea {
 }
 .match-rank-change.promoted, .match-rank-change.placed { color: #4ade80; }
 .match-rank-change.demoted { color: #f87171; }
+
+/* Menú de tres modos */
+.mode-buttons-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
+    margin: 10px auto;
+}
+.mode-buttons-stack .btn-mode {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    width: 100%;
+    margin: 0;
+}
+.mode-desc {
+    font-family: Arial, sans-serif;
+    font-size: 0.8rem;
+    font-weight: normal;
+    opacity: 0.85;
+}
+.btn-mode-ranked {
+    background-color: #E2A342;
+    color: #0f172a;
+}

@@ -35,7 +35,7 @@ Al terminar: abre `https://217.72.207.119/api/health` → debe responder `{"ok":
 
 ## Cómo funciona una partida online
 
-1. Un jugador pulsa **Online → Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
+1. Un jugador pulsa **Ranked** (o **Local**) → **Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
 2. Los demás (hasta 10 en total) pulsan **Unirse**, escriben el código y eligen su ubicación.
 3. El anfitrión (👑) pulsa **Empezar**. El servidor elige los 10 destinos (nunca el país de ningún jugador).
 4. En cada ronda todos ven el mismo destino a la vez y tienen 60 s. El móvil **solo manda el rumbo**:
@@ -87,3 +87,9 @@ Luego cambia `SERVER_URL` en `www/online.js` y `PUBLIC_ORIGIN` en `/etc/donde.en
 cd server && npm install && npm test     # simula una partida completa de 3 jugadores
 npm start                                # servidor en http://127.0.0.1:3000
 ```
+
+### Local y Ranked
+
+Las dos usan salas con código. **Ranked** guarda la partida, los disparos y el LP
+en la base de datos. **Local** cuenta los puntos para anunciar al ganador, pero no
+guarda nada. Un código de una sala Ranked no vale desde Local, ni al revés.

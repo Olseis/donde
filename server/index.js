@@ -155,11 +155,11 @@ function handleMessage(ws, msg) {
   switch (msg.t) {
     case "create":
       if (ws.roomCode) rooms.leaveRoom(ws);
-      rooms.createRoom(player, msg.region);
+      rooms.createRoom(player, msg.region, msg.ranked === true);
       break;
     case "join":
       if (ws.roomCode && ws.roomCode !== String(msg.code || "").toUpperCase()) rooms.leaveRoom(ws);
-      rooms.joinRoom(player, msg.code);
+      rooms.joinRoom(player, msg.code, typeof msg.ranked === "boolean" ? msg.ranked : undefined);
       break;
     case "location":
       rooms.setLocation(ws, msg.location);
