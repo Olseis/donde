@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node test/ranked.test.js && node test/partida.test.js"
+    "test": "node test/ranked.test.js && node test/migracion.test.js && node test/partida.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {

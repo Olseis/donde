@@ -26,6 +26,7 @@ const CFG = {
   RECONNECT_GRACE_MS: 120_000, // si se va todo el mundo, la sala aguanta esto
   LOBBY_IDLE_MS: 30 * 60_000,
   MAX_ROOMS: 500,
+  MAX_ROOMS_PER_IP: 3, // salas abiertas a la vez creadas desde una misma IP
 };
 
 const rooms = new Map(); // code -> room
@@ -49,19 +50,22 @@ function broadcast(room, msg) {
   for (const p of room.players.values()) send(p.ws, msg);
 }
 
+// A los demás nunca se les manda el playerId de nadie, solo su alias (pub)
+const pubOf = (room, id) => (room.players.get(id) || {}).pub;
+
 function publicRoom(room) {
   return {
     code: room.code,
     region: room.region,
     ranked: room.ranked,
-    hostId: room.hostId,
+    hostId: pubOf(room, room.hostId),
     status: room.status,
     round: room.round,
     totalRounds: CFG.ROUNDS,
     minPlayers: CFG.MIN_PLAYERS,
     maxPlayers: CFG.MAX_PLAYERS,
     players: [...room.players.values()].map((p) => ({
-      id: p.id,
+      id: p.pub,
       name: p.name,
       ready: !!p.location,
       connected: !!p.ws,
@@ -90,6 +94,11 @@ function standings(room) {
   return list;
 }
 
+// La clasificación tal y como se envía a los móviles (con alias en vez de playerId)
+function publicStandings(room, list) {
+  return list.map(({ id, ...rest }) => ({ id: pubOf(room, id), ...rest }));
+}
+
 function clearTimers(room) {
   clearTimeout(room.timer);
   room.timer = null;
@@ -101,17 +110,23 @@ function clearTimers(room) {
 function createRoom(player, region, ranked) {
   if (!game.REGIONS.includes(region)) throw userError("bad_region", "Región no válida.");
   if (rooms.size >= CFG.MAX_ROOMS) throw userError("full", "El servidor está lleno, prueba en un rato.");
+  let fromIp = 0;
+  for (const r of rooms.values()) if (r.ownerIp === player.ip && r.status !== "finished") fromIp++;
+  if (fromIp >= CFG.MAX_ROOMS_PER_IP)
+    throw userError("too_many_rooms", "Ya tienes varias salas abiertas. Cierra alguna antes de crear otra.");
 
   const room = {
     code: newCode(),
     region,
     ranked: !!ranked,
     hostId: player.id,
+    ownerIp: player.ip,
     status: "lobby",
     players: new Map(),
     round: 0,
     targets: [],
     matchId: null,
+    targetStats: [], // por ronda: { kind, key, name, shots, hits } (solo se guarda en Ranked)
     shots: new Map(), // playerId -> resultado de la ronda actual
     nextVotes: new Set(),
     timer: null,
@@ -126,7 +141,9 @@ function createRoom(player, region, ranked) {
 function addPlayer(room, player) {
   const existing = room.players.get(player.id);
   if (existing) {
-    // Reconexión: mismo móvil que vuelve a la sala
+    // Reconexión: mismo móvil que vuelve a la sala. Tiene que traer la misma clave.
+    if (existing.secretHash !== player.secretHash)
+      throw userError("in_use", "Ese jugador ya está en la sala desde otro móvil.");
     if (existing.ws && existing.ws !== player.ws) {
       send(existing.ws, { t: "error", code: "replaced", message: "Has entrado desde otra pantalla." });
       existing.ws.roomCode = null;
@@ -141,8 +158,9 @@ function addPlayer(room, player) {
   if (room.players.size >= CFG.MAX_PLAYERS) throw userError("room_full", "La sala está llena.");
 
   const p = {
-    id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
-    rank: store.rankOf(player.id).label, // se enseña en la sala de espera
+    id: player.id, pub: player.pub, secretHash: player.secretHash,
+    name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
+    rank: room.ranked ? store.rankOf(player.id).label : null, // se enseña en la sala de espera
   };
   room.players.set(p.id, p);
   player.ws.roomCode = room.code;
@@ -249,8 +267,11 @@ function startMatch(ws) {
   if (room.targets.length < CFG.ROUNDS)
     throw userError("no_targets", "No hay destinos suficientes en esa región.");
 
-  // Solo las Ranked se guardan
-  room.matchId = room.ranked ? store.createMatch(room.code, room.region, room.targets, players) : null;
+  // Solo las Ranked se guardan (y es aquí cuando el jugador entra en la BD)
+  room.matchId = room.ranked
+    ? store.createMatch(room.code, room.region, CFG.ROUNDS,
+      players.map((p) => ({ id: p.id, name: p.name, secretHash: p.secretHash })))
+    : null;
   room.status = "playing";
   room.round = 0;
   sendRoom(room);
@@ -295,20 +316,8 @@ function handleShot(ws, round, heading) {
   p.score += result.points;
   if (result.isHit) p.hits += 1;
 
-  if (room.ranked) store.saveShot({
-    matchId: room.matchId,
-    round: room.round,
-    playerId: p.id,
-    heading,
-    lng: p.location[0],
-    lat: p.location[1],
-    isHit: result.isHit,
-    points: result.points,
-    distanceKm: result.minDistanceKm,
-  });
-
   send(ws, { t: "shotAck", round: room.round, result });
-  broadcast(room, { t: "progress", round: room.round, answered: [...room.shots.keys()] });
+  broadcast(room, { t: "progress", round: room.round, answered: [...room.shots.keys()].map((id) => pubOf(room, id)) });
   checkRoundProgress(room);
 }
 
@@ -332,15 +341,20 @@ function closeRound(room) {
   // Quien no disparó a tiempo se lleva 0 puntos en esta ronda
   for (const p of room.players.values()) {
     if (!room.shots.has(p.id)) {
-      const missed = { isHit: false, points: 0, minDistanceKm: null, timedOut: true };
-      room.shots.set(p.id, missed);
-      if (room.ranked) store.saveShot({
-        matchId: room.matchId, round: room.round, playerId: p.id,
-        heading: null, lng: p.location[0], lat: p.location[1],
-        isHit: false, points: 0, distanceKm: null,
-      });
+      room.shots.set(p.id, { isHit: false, points: 0, minDistanceKm: null, timedOut: true });
     }
   }
+
+  // Estadística del destino: cuántos dispararon y cuántos acertaron (sin ubicaciones)
+  const target = room.targets[room.round - 1];
+  const fired = [...room.shots.values()].filter((r) => !r.timedOut);
+  room.targetStats.push({
+    kind: target.kind,
+    key: target.id || target.name,
+    name: target.name,
+    shots: fired.length,
+    hits: fired.filter((r) => r.isHit).length,
+  });
 
   const last = room.round >= CFG.ROUNDS;
   room.lastResult = {
@@ -349,8 +363,8 @@ function closeRound(room) {
     total: CFG.ROUNDS,
     last,
     target: room.targets[room.round - 1],
-    results: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, ...room.shots.get(p.id) })),
-    standings: standings(room),
+    results: [...room.players.values()].map((p) => ({ id: p.pub, name: p.name, ...room.shots.get(p.id) })),
+    standings: publicStandings(room, standings(room)),
     nextDeadline: last ? null : Date.now() + CFG.NEXT_TIMEOUT_MS,
   };
   broadcast(room, room.lastResult);
@@ -379,7 +393,7 @@ function finish(room) {
   // Se guarda el resultado y se aplican MMR y LP. Cada jugador recibe su LP y su rango
   // antes y después (el MMR va también, pero el juego no lo enseña: es el número oculto)
   // En Local no se guarda nada: solo se anuncia la clasificación
-  const res = room.ranked ? store.finishMatch(room.matchId, "finished", final) : {};
+  const res = room.ranked ? store.finishMatch(room.matchId, final, room.targetStats) : {};
   for (const s of final) {
     const r = res[s.id];
     if (!r) continue;
@@ -394,15 +408,14 @@ function finish(room) {
       eloDelta: r.mmrAfter - r.mmrBefore,
     });
   }
-  broadcast(room, { t: "finished", matchId: room.matchId, standings: final });
+  broadcast(room, { t: "finished", matchId: room.matchId, standings: publicStandings(room, final) });
   // La sala se borra al rato; los resultados ya están en la base de datos
   room.timer = setTimeout(() => destroyRoom(room), 60_000);
 }
 
 function abandon(room) {
-  if (room.matchId && room.status === "playing") {
-    store.finishMatch(room.matchId, "abandoned", standings(room));
-  }
+  // Una Ranked que no se termina no cuenta para nadie y no se guarda
+  if (room.matchId && room.status === "playing") store.discardMatch(room.matchId);
   destroyRoom(room);
 }
 

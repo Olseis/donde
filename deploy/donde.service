@@ -1,4 +1,5 @@
 # Servicio del servidor de partidas. Se instala en /etc/systemd/system/donde.service
+# El endurecimiento extra va aparte, en donde-endurecido.conf (lo pone deploy/endurecer.sh)
 [Unit]
 Description=Servidor de ¿Dónde queda...? (partidas online + base de datos)
 After=network.target
@@ -13,12 +14,13 @@ ExecStart=/usr/bin/node index.js
 Restart=always
 RestartSec=3
 
-# Solo puede escribir en su carpeta de datos
+# Solo puede escribir en su carpeta de datos, y lo que crea solo lo lee él
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/donde
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

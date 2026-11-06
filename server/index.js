@@ -8,6 +8,7 @@
    que reenvía /api y /ws hasta aquí.
    ======================================= */
 const http = require("http");
+const crypto = require("crypto");
 const express = require("express");
 const { WebSocketServer } = require("ws");
 const store = require("./db");
@@ -38,18 +39,93 @@ function originAllowed(origin) {
 
 const NAME_REGEX = /^[\p{L}\p{N} _.\-]{1,20}$/u;
 const PLAYER_ID_REGEX = /^[a-zA-Z0-9-]{8,64}$/;
+const SECRET_REGEX = /^[A-Za-z0-9_-]{43}$/; // 32 bytes en base64url
+
+/* ---------- Identidad ----------
+   Cada móvil tiene un identificador privado (playerId) y una clave secreta
+   que le da el servidor la primera vez. En la base de datos solo se guarda
+   el hash de la clave. Sin la clave nadie puede jugar con tu cuenta.
+   A los demás jugadores nunca se les enseña tu playerId, sino un alias
+   (publicId) que no sirve para entrar como tú. */
+const PUBLIC_ID_KEY = crypto.randomBytes(32); // cambia en cada arranque; las salas también
+const newSecret = () => crypto.randomBytes(32).toString("base64url");
+const hashSecret = (secret) => crypto.createHash("sha256").update(secret).digest("hex");
+const publicIdOf = (playerId) =>
+  crypto.createHmac("sha256", PUBLIC_ID_KEY).update(playerId).digest("base64url").slice(0, 12);
+function sameHash(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/**
+ * Comprueba la clave de un jugador. Devuelve { hash, issued } (issued = clave nueva
+ * que hay que darle al móvil) o lanza bad_secret si la clave no es la suya.
+ */
+function authenticate(playerId, secret) {
+  const stored = store.secretHashOf(playerId);
+  const given = SECRET_REGEX.test(secret || "") ? hashSecret(secret) : null;
+  if (stored) {
+    if (!sameHash(stored, given)) throw userErr("bad_secret", "Este móvil no tiene la clave de esa cuenta.");
+    return { hash: stored, issued: null };
+  }
+  if (stored === null) {
+    // Jugador de antes de las claves: se queda con la cuenta el primero que vuelve a entrar
+    const issued = given ? null : newSecret();
+    const hash = given || hashSecret(issued);
+    if (!store.claimSecret(playerId, hash)) return authenticate(playerId, secret);
+    return { hash, issued };
+  }
+  // Aún no ha jugado ninguna Ranked: no está en la BD hasta que empiece una
+  if (given) return { hash: given, issued: null };
+  const issued = newSecret();
+  return { hash: hashSecret(issued), issued };
+}
+
+/* ---------- IP real y límites ----------
+   Node solo escucha en 127.0.0.1, así que todo llega desde Apache.
+   - X-Real-IP: Apache la ESCRIBE siempre con la IP de verdad (borra la que mande el cliente).
+   - Si no está, X-Forwarded-For: Apache AÑADE la IP de verdad al final; lo que venga
+     antes lo puede haber escrito cualquiera, así que solo vale la última. */
+function clientIp(req) {
+  const remote = req.socket.remoteAddress || "";
+  const fromProxy = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+  const real = req.headers["x-real-ip"];
+  if (fromProxy && typeof real === "string" && real.trim()) return real.trim();
+  const xff = req.headers["x-forwarded-for"];
+  if (fromProxy && typeof xff === "string") {
+    const last = xff.split(",").pop().trim();
+    if (last) return last;
+  }
+  return remote;
+}
+
+// Límite de peticiones a /api por IP: 60 por minuto (en memoria, sin coste apreciable)
+const API_LIMIT = 60;
+const apiHits = new Map();
+setInterval(() => apiHits.clear(), 60_000).unref();
 
 /* ---------- HTTP ---------- */
 const app = express();
-app.set("trust proxy", "loopback");
 app.disable("x-powered-by");
+app.disable("etag");
+
+app.use("/api", (req, res, next) => {
+  const ip = clientIp(req);
+  const n = (apiHits.get(ip) || 0) + 1;
+  apiHits.set(ip, n);
+  if (n > API_LIMIT) return res.status(429).json({ error: "Demasiadas peticiones, espera un minuto." });
+  next();
+});
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && originAllowed(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Vary", "Origin");
   }
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
@@ -64,11 +140,14 @@ app.get("/api/online/ranking", (req, res) => {
   res.json(store.divisionTable(me, limit));
 });
 
-// Últimas partidas de un jugador
-app.get("/api/online/history", (req, res) => {
-  if (!PLAYER_ID_REGEX.test(req.query.playerId || ""))
-    return res.status(400).json({ error: "playerId no válido" });
-  res.json({ matches: store.history(req.query.playerId) });
+// Últimas partidas de un jugador: solo las suyas, con su clave
+app.post("/api/online/history", express.json({ limit: "1kb" }), (req, res) => {
+  const { playerId, secret } = req.body || {};
+  if (!PLAYER_ID_REGEX.test(playerId || "")) return res.status(400).json({ error: "playerId no válido" });
+  const stored = store.secretHashOf(playerId);
+  if (!stored || !SECRET_REGEX.test(secret || "") || !sameHash(stored, hashSecret(secret)))
+    return res.status(403).json({ error: "No autorizado" });
+  res.json({ matches: store.history(playerId) });
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "No existe" }));
@@ -82,7 +161,7 @@ const MAX_CONN_PER_IP = 12;
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url, "http://x");
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket.remoteAddress;
+  const ip = clientIp(req);
 
   if (url.pathname !== "/ws" || !originAllowed(req.headers.origin)) {
     socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -142,15 +221,21 @@ function handleMessage(ws, msg) {
     const name = typeof msg.name === "string" ? msg.name.trim() : "";
     if (!PLAYER_ID_REGEX.test(msg.playerId || "")) throw userErr("bad_id", "Identificador no válido.");
     if (!NAME_REGEX.test(name)) throw userErr("bad_name", "Escribe un nombre de 1 a 20 letras o números.");
+    if (ws.playerId && ws.playerId !== msg.playerId) throw userErr("bad_id", "Ya te has identificado.");
+    const { hash, issued } = authenticate(msg.playerId, msg.secret);
     ws.playerId = msg.playerId;
     ws.playerName = name;
-    store.savePlayer(ws.playerId, name);
-    ws.send(JSON.stringify({ t: "welcome", playerId: ws.playerId }));
+    ws.secretHash = hash;
+    ws.publicId = publicIdOf(msg.playerId);
+    // Nada se guarda en la BD aquí: solo al empezar una Ranked
+    ws.send(JSON.stringify({ t: "welcome", publicId: ws.publicId, ...(issued ? { secret: issued } : {}) }));
     return;
   }
 
   if (!ws.playerId) throw userErr("no_hello", "Primero identifícate.");
-  const player = { id: ws.playerId, name: ws.playerName, ws };
+  const player = {
+    id: ws.playerId, pub: ws.publicId, name: ws.playerName, secretHash: ws.secretHash, ip: ws.ip, ws,
+  };
 
   switch (msg.t) {
     case "create":
@@ -201,6 +286,9 @@ setInterval(() => {
     ws.ping();
   }
 }, 10_000).unref();
+
+// Cada 6 horas: devuelve al disco el espacio de las partidas borradas
+setInterval(() => store.maintenance(), 6 * 3600_000).unref();
 
 server.listen(PORT, HOST, () => {
   console.log(`Servidor de ¿Dónde queda? en http://${HOST}:${PORT}`);

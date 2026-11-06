@@ -25,6 +25,7 @@ const ONLINE_BASE =
 const ONLINE_WS = ONLINE_BASE.replace(/^http/, "ws") + "/ws";
 
 const PLAYER_ID_KEY = "dondeQueda_playerId";
+const SECRET_KEY = "dondeQueda_secret"; // clave que da el servidor: solo la tiene este móvil
 const ONLINE_NAME_KEY = "dondeQueda_onlineName";
 const NAME_REGEX = /^[\p{L}\p{N} _.\-]{1,20}$/u;
 
@@ -40,6 +41,22 @@ function getPlayerId() {
   return id;
 }
 
+function getSecret() {
+  return localStorage.getItem(SECRET_KEY) || undefined;
+}
+
+// Si el servidor no acepta nuestra clave (otra persona se quedó con este identificador),
+// este móvil empieza una cuenta nueva
+function resetIdentity() {
+  localStorage.removeItem(PLAYER_ID_KEY);
+  localStorage.removeItem(SECRET_KEY);
+}
+
+// Mi alias en las salas: el servidor no enseña a nadie el playerId de los demás
+function isMe(publicId) {
+  return !!Online.publicId && publicId === Online.publicId;
+}
+
 const Online = {
   ws: null,
   name: "",
@@ -47,6 +64,8 @@ const Online = {
   round: null, // ronda en curso { round, total, target, deadline }
   pending: null, // qué estamos esperando tras pulsar un botón: 'create' | 'join'
   wantConnected: false,
+  publicId: null,
+  identityReset: false,
   retries: 0,
   timerInterval: null,
   lastResult: null,
@@ -67,14 +86,22 @@ const Online = {
       ws.onopen = () => {
         clearTimeout(failTimer);
         this.retries = 0;
-        this.send({ t: "hello", playerId: getPlayerId(), name: this.name });
+        this.send({ t: "hello", playerId: getPlayerId(), secret: getSecret(), name: this.name });
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.t === "welcome") {
+          this.publicId = msg.publicId;
+          if (msg.secret) localStorage.setItem(SECRET_KEY, msg.secret);
           resolve();
           // Si se cortó la conexión estando en una sala, volvemos a entrar
           if (this.room) this.send({ t: "join", code: this.room.code, ranked: this.room.ranked });
+        }
+        if (msg.t === "error" && msg.code === "bad_secret" && !this.identityReset) {
+          this.identityReset = true;
+          resetIdentity();
+          this.send({ t: "hello", playerId: getPlayerId(), name: this.name });
+          return;
         }
         this.handle(msg);
       };
@@ -155,7 +182,7 @@ const Online = {
   },
 
   isHost() {
-    return this.room && this.room.hostId === getPlayerId();
+    return this.room && isMe(this.room.hostId);
   },
 
   /* ---------- Mensajes del servidor ---------- */
@@ -184,7 +211,7 @@ const Online = {
     renderWaitingRoom();
 
     // Tras una reconexión en la sala de espera, el servidor ya no tiene tu ubicación: se reenvía
-    const me = room.players.find((p) => p.id === getPlayerId());
+    const me = room.players.find((p) => isMe(p.id));
     if (room.status === "lobby" && me && !me.ready && this.locationSent && state.userLocation) {
       this.sendLocation(state.userLocation);
     }
@@ -319,13 +346,13 @@ function renderWaitingRoom() {
     const li = document.createElement("li");
     const name = document.createElement("span");
     name.textContent =
-      p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
+      p.name + (p.id === room.hostId ? " 👑" : "") + (isMe(p.id) ? " (tú)" : "") +
       (room.ranked && p.rank ? ` · ${shortRank(p.rank)}` : "");
     const status = document.createElement("span");
     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
     status.className = "room-player-status";
     li.append(name, status);
-    if (p.id === getPlayerId()) li.classList.add("highlight-gold");
+    if (isMe(p.id)) li.classList.add("highlight-gold");
     OUI.roomPlayers.appendChild(li);
   });
 
@@ -408,7 +435,7 @@ function stopRoundTimer() {
 
 function myStanding() {
   const list = (Online.lastResult && Online.lastResult.standings) || (Online.room && Online.room.players) || [];
-  return list.find((p) => p.id === getPlayerId());
+  return list.find((p) => isMe(p.id));
 }
 
 // Lo llama app.js al pulsar "Comprobar" en modo online
@@ -437,7 +464,7 @@ function onProgress(msg) {
 
 function showOnlineRoundResult(msg) {
   stopRoundTimer();
-  const mine = msg.results.find((r) => r.id === getPlayerId());
+  const mine = msg.results.find((r) => isMe(r.id));
 
   // Si se acabó el tiempo sin disparar, pasamos directamente a la pantalla de resultado
   if (!document.getElementById("result-screen").classList.contains("active")) {
@@ -463,7 +490,7 @@ function showOnlineRoundResult(msg) {
     const right = document.createElement("span");
     right.textContent = `${r.timedOut ? "⏱" : r.isHit ? "✅" : "❌"} +${r.points || 0} · ${s.score}`;
     li.append(left, right);
-    if (s.id === getPlayerId()) li.classList.add("highlight-gold");
+    if (isMe(s.id)) li.classList.add("highlight-gold");
     OUI.roundList.appendChild(li);
   });
   OUI.roundList.style.display = "";
@@ -488,14 +515,14 @@ function onlineNext() {
 function showOnlineFinal() {
   const standings = Online.finalStandings || (Online.lastResult && Online.lastResult.standings) || [];
   const winners = standings.filter((s) => s.position === 1);
-  const me = standings.find((s) => s.id === getPlayerId());
+  const me = standings.find((s) => isMe(s.id));
   state.players = me ? [{ name: me.name, score: me.score, hits: me.hits }] : state.players;
 
   if (UI.leaderboardWinnerTitle) {
     UI.leaderboardWinnerTitle.textContent =
       winners.length > 1
         ? "¡Empate!"
-        : winners[0] && winners[0].id === getPlayerId()
+        : winners[0] && isMe(winners[0].id)
           ? "¡Has ganado! 🏆"
           : `¡Ha ganado ${winners[0] ? winners[0].name : "?"}!`;
     UI.leaderboardWinnerTitle.style.display = "block";
@@ -533,12 +560,12 @@ function renderMatchStandings(standings) {
     else if (s.lpDelta !== undefined) rank = ` · ${s.lpDelta >= 0 ? "+" : ""}${s.lpDelta} LP`;
     right.textContent = `${s.score} pts${rank}`;
     li.append(left, right);
-    if (s.id === getPlayerId()) li.classList.add("highlight-gold");
+    if (isMe(s.id)) li.classList.add("highlight-gold");
     list.appendChild(li);
   });
 
   // Tu rango después de la partida, y si has subido o bajado
-  const me = standings.find((s) => s.id === getPlayerId());
+  const me = standings.find((s) => isMe(s.id));
   const box = document.getElementById("match-rank");
   if (box) {
     box.textContent = "";

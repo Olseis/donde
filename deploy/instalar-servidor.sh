@@ -13,6 +13,8 @@
 #   3. Configura Apache: el juego por HTTPS y /api y /ws hacia Node
 #   4. Crea el servicio "donde" (Node + base de datos SQLite) que arranca solo
 #   5. Cambia el cron viejo por deploy/actualizar.sh
+#   6. Endurece el servidor (deploy/endurecer.sh): cron sin root, servicio
+#      encerrado, copias diarias, cortafuegos y fail2ban
 #
 #  Se puede volver a ejecutar sin problema: lo que ya está hecho lo deja igual.
 # ==========================================================
@@ -83,7 +85,7 @@ paso "2/6 Servidor de partidas (Node + SQLite)"
 id donde >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin donde
 mkdir -p "$DATA_DIR"
 chown donde:donde "$DATA_DIR"
-chmod 750 "$DATA_DIR"
+chmod 700 "$DATA_DIR"
 
 cat > /etc/donde.env <<EOF
 # Configuración del servidor de ¿Dónde queda...? (la lee systemd y deploy/actualizar.sh)
@@ -154,19 +156,14 @@ systemctl reload apache2
 ok "https://$IP sirve el juego, /api y /ws"
 
 # ----------------------------------------------------------
-paso "6/6 Cron de actualización"
-chmod +x "$REPO_DIR/deploy/actualizar.sh"
+paso "6/6 Cron de actualización y endurecimiento"
+chmod +x "$REPO_DIR/deploy/actualizar.sh" "$REPO_DIR/deploy/endurecer.sh"
 # Quitar la línea vieja del crontab de root (la del git reset) si existe
 if crontab -l 2>/dev/null | grep -q "git reset"; then
   crontab -l | grep -v "git reset" | crontab -
   ok "Quitado el cron viejo de crontab -e"
 fi
-cat > /etc/cron.d/donde-actualizar <<EOF
-# Cada minuto: trae lo último de la rama $BRANCH y reinicia el servidor si ha cambiado
-* * * * * root $REPO_DIR/deploy/actualizar.sh >> /var/log/donde-actualizar.log 2>&1
-EOF
-chmod 644 /etc/cron.d/donde-actualizar
-ok "Cron en /etc/cron.d/donde-actualizar (registro en /var/log/donde-actualizar.log)"
+bash "$REPO_DIR/deploy/endurecer.sh"
 
 # ----------------------------------------------------------
 echo

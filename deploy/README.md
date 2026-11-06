@@ -7,7 +7,8 @@ Móvil / navegador ──HTTPS──▶ Apache (443) ──┬─▶ /          
                                             ├─▶ /api/...   ranking e historial ─┐
                                             └─▶ /ws        partidas online ─────┴─▶ Node (127.0.0.1:3000)
                                                                                      └─▶ SQLite /var/lib/donde/donde.db
-cron (cada minuto) ─▶ deploy/actualizar.sh ─▶ git reset a la rama + reinicia Node si cambió server/
+cron (cada minuto, usuario deploy) ─▶ deploy/actualizar.sh ─▶ git reset a la rama + reinicia Node si cambió server/
+cron (4:37, usuario donde)          ─▶ server/backup.js      ─▶ copia comprimida en /var/lib/donde/copias (7 días)
 ```
 
 ## Por qué hacía falta HTTPS
@@ -33,6 +34,24 @@ Antes, en el panel del proveedor del VPS, comprueba que los puertos **80 y 443**
 
 Al terminar: abre `https://217.72.207.119/api/health` → debe responder `{"ok":true,...}`.
 
+El instalador termina llamando a `deploy/endurecer.sh` (ver **Seguridad**). En un servidor
+ya instalado, basta con ejecutar ese script una vez: `bash /var/www/testing/deploy/endurecer.sh`.
+
+## Seguridad
+
+| Qué | Cómo |
+|---|---|
+| Cuentas | Cada móvil tiene un id privado y una **clave secreta** que le da el servidor. En la BD solo está su hash (SHA-256). Sin la clave no se puede jugar con la cuenta de otro ni ver su historial. |
+| Ids | Los demás jugadores solo ven un **alias** (`publicId`), que no sirve para entrar como tú. |
+| Anti-abuso | IP real (Apache escribe `X-Real-IP`; no se puede falsificar). 12 conexiones y 3 salas abiertas por IP, 60 mensajes cada 10 s, 60 peticiones/min a `/api`. Abrir el modo online no guarda nada. |
+| Despliegue | El cron corre como `deploy` (dueño del repo, no root). Solo puede hacer `systemctl restart donde` (`/etc/sudoers.d/donde-deploy`). Sin token de GitHub en el servidor. |
+| Servicio | `donde` corre como usuario sin privilegios, sin red hacia fuera (solo 127.0.0.1), sin capacidades y sin poder escribir fuera de `/var/lib/donde` (`donde-endurecido.conf`). |
+| Datos | `/var/lib/donde` es 700 y la BD 600: solo la lee el servicio. Copia diaria con prioridad mínima. |
+| VPS | ufw (solo SSH, 80 y 443), fail2ban para SSH, actualizaciones de seguridad automáticas, Apache sin versión a la vista. |
+
+Nada de esto gasta CPU durante las partidas: son límites en memoria y reglas que aplica el
+núcleo al arrancar el servicio.
+
 ## Cómo funciona una partida online
 
 1. Un jugador pulsa **Ranked** (o **Local**) → **Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
@@ -48,20 +67,24 @@ Si alguien se va, la partida sigue sin esperarle.
 
 ## Base de datos
 
-`/var/lib/donde/donde.db` (fuera del repo: el cron nunca la toca).
+`/var/lib/donde/donde.db` (fuera del repo: el cron nunca la toca). Solo guarda **Ranked**.
+Su tamaño está acotado: unos 4 KB por jugador de Ranked, juegue las partidas que juegue.
 
 | Tabla | Qué guarda |
 |---|---|
-| `players` | cada móvil (id anónimo) y su último nombre |
-| `matches` | cada partida: sala, región, estado (`playing`, `finished`, `abandoned`) |
-| `match_players` | quién jugó, puntos, aciertos y puesto |
-| `rounds` | el destino de cada ronda |
-| `shots` | cada disparo: rumbo, ubicación, acierto, puntos y distancia |
+| `players` | cada jugador de Ranked: nombre, hash de su clave, MMR, rango y totales (victorias, mejor puntuación, aciertos). Se crea al empezar su primera Ranked |
+| `matches` | las partidas Ranked terminadas (las que no se terminan se borran) |
+| `match_players` | quién jugó, puntos, puesto y LP. **Solo las últimas 20 de cada jugador** |
+| `target_stats` | por destino: cuántos disparos y cuántos aciertos |
+
+No se guarda **dónde estaba nadie** ni cada disparo suelto.
 
 ```bash
-sqlite3 /var/lib/donde/donde.db "SELECT name, score, position FROM match_players ORDER BY rowid DESC LIMIT 10;"
-cp /var/lib/donde/donde.db ~/copia-$(date +%F).db     # copia de seguridad
+sqlite3 /var/lib/donde/donde.db "SELECT name, shots, hits FROM target_stats ORDER BY 1.0*hits/shots LIMIT 10;"  # los más difíciles
+ls -lh /var/lib/donde/copias                         # copias de seguridad (7 días)
+sudo -u donde node /var/www/testing/server/backup.js # hacer una copia ya
 ```
+Para restaurar una copia, mira las instrucciones al principio de `server/backup.js`.
 
 ## Comandos útiles
 
@@ -70,10 +93,11 @@ systemctl status donde                 # ¿está en marcha?
 journalctl -u donde -f                 # registro en directo
 tail -f /var/log/donde-actualizar.log  # qué ha traído el cron
 certbot certificates                   # estado del certificado
-bash deploy/actualizar.sh              # forzar una actualización ya
+sudo -u deploy -H /var/www/testing/deploy/actualizar.sh   # forzar una actualización ya
 ```
 
-Reiniciar el servidor corta las partidas en curso (quedan como `abandoned`).
+Reiniciar el servidor corta las partidas en curso (no cuentan y no se guardan).
+Si un reinicio falla, el cron lo vuelve a intentar al minuto siguiente.
 El cron solo lo reinicia cuando cambia algo de `server/`, `www/shot.js` o `www/data.js`.
 
 ## Si algún día tenéis dominio
@@ -90,6 +114,6 @@ npm start                                # servidor en http://127.0.0.1:3000
 
 ### Local y Ranked
 
-Las dos usan salas con código. **Ranked** guarda la partida, los disparos y el LP
+Las dos usan salas con código. **Ranked** guarda la partida y el LP
 en la base de datos. **Local** cuenta los puntos para anunciar al ganador, pero no
 guarda nada. Un código de una sala Ranked no vale desde Local, ni al revés.

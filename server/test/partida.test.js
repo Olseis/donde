@@ -20,12 +20,12 @@ function startServer() {
 }
 
 class Client {
-  constructor(name, origin = "https://localhost") {
+  constructor(name, origin = "https://localhost", headers = {}) {
     this.name = name;
     this.id = `test-${name}-${Math.random().toString(36).slice(2, 10)}`;
     this.inbox = [];
     this.waiters = [];
-    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { origin });
+    this.ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { origin, headers });
     this.ws.on("message", (raw) => {
       const msg = JSON.parse(raw);
       const i = this.waiters.findIndex((w) => w.pred(msg));
@@ -35,6 +35,15 @@ class Client {
     this.open = new Promise((r, j) => { this.ws.on("open", r); this.ws.on("error", j); });
   }
   send(msg) { this.ws.send(JSON.stringify(msg)); }
+  // Se identifica y guarda la clave que le da el servidor (como hace el móvil)
+  async hello() {
+    this.send({ t: "hello", playerId: this.id, secret: this.secret, name: this.name });
+    const w = await this.wait((m) => m.t === "welcome" || m.t === "error");
+    if (w.t === "error") throw Object.assign(new Error(w.message), { code: w.code });
+    if (w.secret) this.secret = w.secret;
+    this.publicId = w.publicId;
+    return w;
+  }
   wait(pred, ms = 5000) {
     const i = this.inbox.findIndex(pred);
     if (i >= 0) return Promise.resolve(this.inbox.splice(i, 1)[0]);
@@ -47,6 +56,88 @@ class Client {
   waitT(t, extra = () => true) { return this.wait((m) => m.t === t && extra(m)); }
 }
 
+/* ---------- Las pruebas de la auditoría de seguridad ---------- */
+async function seguridad(ana, beto, db) {
+  // 1. Suplantación: con el identificador de Ana pero sin su clave, el servidor no deja entrar
+  const impostor = new Client("Impostor"); await impostor.open;
+  impostor.id = ana.id;
+  await assert.rejects(impostor.hello(), (e) => e.code === "bad_secret");
+  impostor.secret = "A".repeat(43);
+  await assert.rejects(impostor.hello(), (e) => e.code === "bad_secret");
+  // Con la clave buena, sí (es el móvil de Ana de verdad)
+  const ana3 = new Client("Ana"); await ana3.open;
+  Object.assign(ana3, { id: ana.id, secret: ana.secret });
+  assert.ok(!(await ana3.hello()).secret, "a un jugador que ya tiene clave no se le da otra");
+  console.log("✔ sin la clave no se puede jugar con la cuenta de otro");
+
+  // Lo mismo en una sala con alguien que aún no está en la BD (nunca jugó Ranked)
+  const nuevo = new Client("Nuevo"); await nuevo.open; await nuevo.hello();
+  nuevo.send({ t: "create", region: "Europa", ranked: false });
+  const sala = (await nuevo.waitT("room")).room.code;
+  const copia = new Client("Copia"); await copia.open;
+  copia.id = nuevo.id; await copia.hello(); // otra clave distinta
+  copia.send({ t: "join", code: sala, ranked: false });
+  assert.strictEqual((await copia.waitT("error")).code, "in_use");
+  console.log("✔ en una sala tampoco se puede echar a nadie usando su identificador");
+
+  // 2. Historial: solo con la clave
+  const hist = (body) => fetch(`http://127.0.0.1:${PORT}/api/online/history`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  assert.strictEqual((await hist({ playerId: ana.id })).status, 403);
+  assert.strictEqual((await hist({ playerId: ana.id, secret: beto.secret })).status, 403);
+  const h = await (await hist({ playerId: ana.id, secret: ana.secret })).json();
+  assert.strictEqual(h.matches.length, 1);
+  assert.strictEqual(h.matches[0].players, 3);
+  assert.strictEqual((await fetch(`http://127.0.0.1:${PORT}/api/online/history?playerId=${ana.id}`)).status, 404);
+  console.log("✔ el historial solo lo ve su dueño");
+
+  // 3. Saludar no crea filas en la BD
+  const before = db.prepare("SELECT COUNT(*) n FROM players").get().n;
+  const spam = new Client("Spam"); await spam.open;
+  for (let i = 0; i < 30; i++) spam.send({ t: "hello", playerId: `spam-${i}-xxxxxxxx`, name: "Spam" });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM players").get().n, before);
+  console.log("✔ abrir el modo online no crea jugadores en la BD");
+
+  // 4. X-Forwarded-For falso: cuenta la IP que añade Apache (la última), no la inventada
+  const conns = [];
+  let rejected = 0;
+  for (let i = 0; i < 16; i++) {
+    // La mitad como lo manda Apache con X-Real-IP y la otra mitad solo con X-Forwarded-For
+    const headers = i % 2
+      ? { "X-Forwarded-For": `10.0.0.${i}`, "X-Real-IP": "203.0.113.7" }
+      : { "X-Forwarded-For": `10.0.0.${i}, 203.0.113.7` };
+    const c = new Client(`ip${i}`, "https://localhost", headers);
+    conns.push(c);
+    await c.open.catch(() => rejected++);
+  }
+  assert.strictEqual(rejected, 4, "solo 12 conexiones por IP aunque se invente la cabecera");
+  console.log("✔ no se puede saltar el límite por IP inventando X-Forwarded-For");
+
+  // 5. Salas por IP: como mucho 3 abiertas a la vez
+  const errors = [];
+  for (const c of conns.slice(0, 4)) {
+    if (c.ws.readyState !== 1) continue;
+    await c.hello();
+    c.send({ t: "create", region: "Europa", ranked: false });
+    const m = await c.wait((x) => x.t === "room" || x.t === "error");
+    if (m.t === "error") errors.push(m.code);
+  }
+  assert.deepStrictEqual(errors, ["too_many_rooms"]);
+  console.log("✔ como mucho 3 salas abiertas por IP");
+  conns.forEach((c) => c.ws.terminate());
+
+  // 6. API: 60 peticiones por minuto y por IP
+  let limited = 0;
+  for (let i = 0; i < 70; i++) {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/health`, { headers: { "X-Forwarded-For": `1.1.1.${i}, 198.51.100.9` } });
+    if (r.status === 429) limited++;
+  }
+  assert(limited >= 9, "la API corta a partir de 60 por minuto");
+  console.log("✔ límite de peticiones en la API");
+}
+
 (async () => {
   const proc = await startServer();
   try {
@@ -56,8 +147,8 @@ class Client {
     const ana = new Client("Ana"), beto = new Client("Beto"), cris = new Client("Cris");
     await Promise.all([ana.open, beto.open, cris.open]);
     for (const c of [ana, beto, cris]) {
-      c.send({ t: "hello", playerId: c.id, name: c.name });
-      await c.waitT("welcome");
+      const w = await c.hello();
+      assert.match(w.secret, /^[A-Za-z0-9_-]{43}$/, "el servidor da una clave nueva");
     }
 
     // Nombre con HTML: rechazado
@@ -75,7 +166,11 @@ class Client {
     assert.strictEqual((await beto.waitT("error")).code, "wrong_mode");
     beto.send({ t: "join", code: room.code.toLowerCase(), ranked: true }); // el código no distingue mayúsculas
     cris.send({ t: "join", code: room.code, ranked: true });
-    await ana.waitT("room", (m) => m.room.players.length === 3);
+    const full = (await ana.waitT("room", (m) => m.room.players.length === 3)).room;
+    // Los demás solo ven alias, nunca el identificador privado de nadie
+    const ids = [ana.id, beto.id, cris.id];
+    assert(full.players.every((p) => !ids.includes(p.id)) && !ids.includes(full.hostId));
+    assert.strictEqual(full.hostId, ana.publicId);
 
     // Beto intenta empezar sin ser anfitrión
     beto.send({ t: "start" });
@@ -125,15 +220,20 @@ class Client {
     assert(Math.abs(fin.standings.reduce((s, p) => s + p.eloDelta, 0)) <= 1, "el Elo se reparte, no se crea");
     console.log("Elo:", fin.standings.map((p) => `${p.name} ${p.eloAfter} (${p.eloDelta >= 0 ? "+" : ""}${p.eloDelta})`).join(" | "));
 
-    // La BD tiene la partida, las 10 rondas y 30 disparos (el segundo de Cris se ignoró)
+    // La BD tiene la partida y las estadísticas de los 10 destinos: 30 disparos (el segundo de Cris no cuenta)
     const db = require("better-sqlite3")(DB, { readonly: true });
     assert.strictEqual(db.prepare("SELECT status FROM matches WHERE id = ?").get(fin.matchId).status, "finished");
-    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM rounds WHERE match_id = ?").get(fin.matchId).n, 10);
-    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM shots WHERE match_id = ?").get(fin.matchId).n, 30);
-    assert.strictEqual(
-      db.prepare("SELECT COUNT(*) n FROM shots WHERE player_id = ? AND heading = 90").get(cris.id).n, 0,
-      "el segundo disparo no cuenta",
-    );
+    assert.strictEqual(db.prepare("SELECT SUM(shots) n FROM target_stats").get().n, 30);
+    const tablas = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name);
+    assert(!tablas.includes("shots") && !tablas.includes("rounds"), "no hay tabla de disparos");
+    for (const t of tablas) {
+      const cols = db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+      assert(!cols.includes("lat") && !cols.includes("lng"), `la tabla ${t} no guarda ubicaciones`);
+    }
+    // Solo el hash de la clave
+    const row = db.prepare("SELECT secret_hash FROM players WHERE id = ?").get(ana.id);
+    assert.match(row.secret_hash, /^[0-9a-f]{64}$/);
+    assert.notStrictEqual(row.secret_hash, ana.secret);
 
     const ranking = await (await fetch(`http://127.0.0.1:${PORT}/api/online/ranking?playerId=${ana.id}`)).json();
     // Primera partida: todos siguen en clasificación (1/5) y no tienen tabla todavía
@@ -150,7 +250,7 @@ class Client {
     // Segunda partida: Beto cierra la app a mitad de ronda y la partida sigue sin esperarle
     const ana2 = new Client("Ana2"), beto2 = new Client("Beto2");
     await Promise.all([ana2.open, beto2.open]);
-    for (const c of [ana2, beto2]) { c.send({ t: "hello", playerId: c.id, name: c.name }); await c.waitT("welcome"); }
+    for (const c of [ana2, beto2]) await c.hello();
     ana2.send({ t: "create", region: "España", ranked: false }); // sala Local
     const sala2 = (await ana2.waitT("room")).room.code;
     beto2.send({ t: "join", code: sala2 });
@@ -183,7 +283,11 @@ class Client {
     const dbl = require("better-sqlite3")(DB, { readonly: true });
     assert.strictEqual(dbl.prepare("SELECT COUNT(*) n FROM matches").get().n, 1, "solo se guardó la Ranked");
     assert.strictEqual(dbl.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(ana2.id).n, 0);
+    assert.strictEqual(dbl.prepare("SELECT COUNT(*) n FROM players WHERE id IN (?, ?)").get(ana2.id, beto2.id).n, 0,
+      "Local: los jugadores ni siquiera entran en la BD");
     console.log("Sala Local: ganador anunciado, nada guardado ✔");
+
+    await seguridad(ana, beto, dbl);
 
     console.log("\n✅ Todas las comprobaciones han pasado");
     process.exitCode = 0;

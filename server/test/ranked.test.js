@@ -68,12 +68,11 @@ console.log("✔ ascensos, descensos y suelo en Hierro IV");
 
 // 4. Con la base de datos: 10 jugadores, 6 partidas siempre en el mismo orden
 const ids = ten.map((p) => `jugador-${p.id}-xx`);
-ids.forEach((id, i) => store.savePlayer(id, `J${i + 1}`));
 for (let g = 1; g <= 6; g++) {
-  const matchId = store.createMatch("TEST", "Europa", [{ kind: "country", id: "FRA", name: "Francia" }],
-    ids.map((id, i) => ({ id, name: `J${i + 1}` })));
-  const out = store.finishMatch(matchId, "finished",
-    ids.map((id, i) => ({ id, score: 1000 - i * 50, hits: 10 - i, position: i + 1 })));
+  const matchId = store.createMatch("TEST", "Europa", 10, ids.map((id, i) => ({ id, name: `J${i + 1}` })));
+  const out = store.finishMatch(matchId,
+    ids.map((id, i) => ({ id, score: 1000 - i * 50, hits: 10 - i, position: i + 1 })),
+    [{ kind: "country", key: "FRA", name: "Francia", shots: 10, hits: 4 }]);
   if (g <= 4) assert.strictEqual(store.rankOf(ids[0]).label, `Clasificación ${g}/5`);
   if (g === 5) {
     assert(Object.values(out).every((r) => r.change === "placed"), "tras la 5.ª todos tienen rango");
@@ -97,7 +96,6 @@ for (const id of [ids[0], ids[5], ids[9]]) {
   console.log(`  Tabla de ${mine.tierName} ${mine.division}:`, t.ranking.map((r) => `${r.name} ${r.lp}`).join(", "));
 }
 const unranked = "jugador-nuevo-123";
-store.savePlayer(unranked, "Nuevo");
 assert.strictEqual(store.divisionTable(unranked, 50).table, null);
 console.log("✔ clasificación, tablas por división y jugador sin rango");
 
@@ -107,5 +105,25 @@ const apex = R.apexTiers([
 ]);
 assert.deepStrictEqual(apex, { x: "challenger", y: "grandmaster", z: "master" });
 console.log("✔ Maestro / Gran Maestro / Aspirante");
+
+// 6. Tamaño acotado: de cada jugador solo quedan sus últimas 20 partidas,
+//    pero su rango, victorias y mejor puntuación siguen contando todas
+const pair = ["poda-a-000001", "poda-b-000001"];
+let firstId;
+for (let g = 1; g <= 25; g++) {
+  const m = store.createMatch("PODA", "Europa", 10, pair.map((id) => ({ id, name: id.slice(5, 6) })));
+  if (g === 1) firstId = m;
+  store.finishMatch(m, [{ id: pair[0], score: 500 + g, hits: 3, position: 1 }, { id: pair[1], score: 100, hits: 1, position: 2 }]);
+}
+const sql = store.db;
+assert.strictEqual(sql.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(pair[0]).n, store.KEEP_MATCHES);
+assert.strictEqual(sql.prepare("SELECT COUNT(*) n FROM matches WHERE code = 'PODA'").get().n, store.KEEP_MATCHES);
+assert(!sql.prepare("SELECT 1 FROM matches WHERE id = ?").get(firstId), "las partidas viejas se borran");
+const a = sql.prepare("SELECT wins, best_score, hits, elo_games FROM players WHERE id = ?").get(pair[0]);
+assert.deepStrictEqual(a, { wins: 25, best_score: 525, hits: 75, elo_games: 25 });
+assert.strictEqual(store.history(pair[0]).length, store.KEEP_MATCHES);
+const fra = sql.prepare("SELECT shots, hits FROM target_stats WHERE kind = 'country' AND target_key = 'FRA'").get();
+assert.deepStrictEqual(fra, { shots: 60, hits: 24 });
+console.log("✔ solo las últimas 20 partidas por jugador; los totales no se pierden");
 
 console.log("\n✅ Clasificatoria correcta");
