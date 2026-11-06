@@ -34,7 +34,7 @@ main() {
 
   # ¿Ha cambiado algo del servidor?
   local changed
-  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js || true)
+  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js www/elo.js || true)
   if [ -n "$changed" ]; then
     if git diff --name-only "$before" "$after" | grep -q '^server/package'; then
       echo "  Dependencias nuevas → npm ci"

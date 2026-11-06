@@ -521,7 +521,8 @@ async function loadAssetsAndPrepareLoc() {
 
     try {
       let geoRes = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
-      state.countriesGeoJSON = await geoRes.json();
+      // Se añaden los microestados (Andorra, Mónaco...), que no vienen en el mapa
+      state.countriesGeoJSON = DondeShot.withMicrostates(turf, await geoRes.json(), microstates);
     } catch (error) {
       alert("Error al descargar mapas. Revisa tu conexión.");
       goToRegionSelect();
@@ -815,7 +816,8 @@ function startNewRound() {
           alert("Error crítico: Faltan los datos de las ciudades de España. Asegúrate de haber actualizado el archivo 'data.js'.");
           return;
       }
-      let validCities = citiesData;
+      let validCities = citiesData.filter((c) => !DondeShot.tooClose(turf, 'spain', state.userLocation, [c.lng, c.lat]));
+      if (!validCities.length) validCities = citiesData;
       if (validCities.length > 1) {
           validCities = validCities.filter((c) => c.name !== previousId);
       }
@@ -828,8 +830,9 @@ function startNewRound() {
         if (!inDict) return false;
         if (state.continent === "Todos" && f.id === "ESP") return false;
         if (f.id === state.userCountryId) return false; 
-        if (state.continent === "Todos") return true;
-        return inDict.continent === state.continent;
+        if (state.continent !== "Todos" && inDict.continent !== state.continent) return false;
+        // Nada que esté tan cerca que se acierte apuntando a cualquier lado (el Vaticano desde Roma)
+        return !DondeShot.tooClose(turf, 'world', state.userLocation, turf.centroid(f).geometry.coordinates);
       });
 
       if (validCountries.length > 1) {
@@ -841,6 +844,13 @@ function startNewRound() {
       const center = turf.centroid(state.targetData).geometry.coordinates;
       state.targetCenterLatLng = L.latLng(center[1], center[0]);
   }
+}
+
+// "+200 puntos (bonus +100)" en un acierto con bonus; si fallas, lo que valía
+function pointsText(shot, points) {
+  if (shot.isHit && shot.bonus > 0) return `+${points} puntos (bonus +${shot.bonus})`;
+  if (!shot.isHit && shot.maxPoints > shot.points) return `+${points} puntos · acertar valía ${shot.maxPoints}`;
+  return `+${points} puntos`;
 }
 
 const btnConfirmGame = document.getElementById("btn-confirm");
@@ -858,6 +868,7 @@ if (btnConfirmGame) {
       });
       const isHit = shot.isHit;
       if (state.mode === 'spain') state.targetData.polygonGeometry = shot.targetGeometry;
+      state.lastShot = shot; // el mapa del resultado dibuja la zona de acierto
 
       let turnPoints = state.gameMode === 'classic' ? 0 : shot.points;
 
@@ -880,7 +891,7 @@ if (btnConfirmGame) {
           if (state.gameMode === 'classic') {
             UI.turnPointsDisplay.style.display = "none";
           } else {
-            UI.turnPointsDisplay.textContent = `+${turnPoints} puntos`;
+            UI.turnPointsDisplay.textContent = pointsText(shot, turnPoints);
             UI.turnPointsDisplay.style.display = "block";
           }
       }
@@ -924,17 +935,55 @@ if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
 /* =======================================
    LEADERBOARD Y PUNTUACIONES 
    ======================================= */
+/* Ranking local por Elo (elo.js). Se guarda en el móvil:
+   dondeQueda_elo_local = { "Nombre": { elo, games, wins, best } }
+   Los nombres del ranking antiguo (mejor puntuación) se conservan con 1000 de Elo. */
+const LOCAL_ELO_KEY = "dondeQueda_elo_local";
+const OLD_LOCAL_KEY = "dondeQueda_scores_local";
+
+function loadLocalElo() {
+  let table = null;
+  try { table = JSON.parse(localStorage.getItem(LOCAL_ELO_KEY)); } catch {}
+  if (table) return table;
+  table = {};
+  try {
+    const old = JSON.parse(localStorage.getItem(OLD_LOCAL_KEY)) || {};
+    Object.entries(old).forEach(([name, best]) => {
+      table[name] = { elo: DondeElo.START, games: 0, wins: 0, best: best || 0 };
+    });
+  } catch {}
+  return table;
+}
+
+// Busca el nombre sin distinguir mayúsculas, para no duplicar a "ana" y "Ana"
+function localEloKey(table, name) {
+  return Object.keys(table).find((k) => k.toLowerCase() === name.toLowerCase()) || name;
+}
+
 function saveScores(type) {
-  const key = type === 'local' ? "dondeQueda_scores_local" : "dondeQueda_scores_online";
-  let scores = JSON.parse(localStorage.getItem(key)) || {};
-  state.players.forEach((p) => {
-    let nameToSave = p.name.trim();
-    if (nameToSave === "") return;
-    let existingKey = Object.keys(scores).find((k) => k.toLowerCase() === nameToSave.toLowerCase());
-    let keyToUse = existingKey || nameToSave;
-    if (!scores[keyToUse] || p.score > scores[keyToUse]) scores[keyToUse] = p.score;
+  if (type !== 'local') return;
+  const table = loadLocalElo();
+  const players = state.players.filter((p) => p.name.trim());
+  // Puesto de cada uno: más puntos gana; a igualdad, más aciertos; si no, empate
+  const ranked = players.map((p) => ({ p, key: localEloKey(table, p.name.trim()) }));
+  ranked.forEach((r) => {
+    r.position = 1 + ranked.filter((o) => o.p.score > r.p.score || (o.p.score === r.p.score && o.p.hits > r.p.hits)).length;
+    if (!table[r.key]) table[r.key] = { elo: DondeElo.START, games: 0, wins: 0, best: 0 };
   });
-  localStorage.setItem(key, JSON.stringify(scores));
+  const result = DondeElo.rateMatch(ranked.map((r) => ({
+    id: r.key, rating: table[r.key].elo, games: table[r.key].games, position: r.position,
+  })));
+  state.lastEloDeltas = {};
+  result.forEach((res) => {
+    const r = ranked.find((x) => x.key === res.id);
+    const row = table[res.id];
+    row.elo = res.after;
+    row.games += 1;
+    if (r.position === 1 && ranked.some((o) => o.position > 1)) row.wins += 1;
+    row.best = Math.max(row.best || 0, r.p.score);
+    state.lastEloDeltas[res.id.toLowerCase()] = res.delta;
+  });
+  localStorage.setItem(LOCAL_ELO_KEY, JSON.stringify(table));
 }
 
 function renderLeaderboard(isEndGame = false) {
@@ -958,43 +1007,44 @@ function renderLeaderboard(isEndGame = false) {
       }
   }
 
-  const renderList = (key, listEl) => {
+  // Ranking local: ordenado por Elo
+  const renderLocalElo = (listEl) => {
       if(!listEl) return null;
-      let scores = JSON.parse(localStorage.getItem(key)) || {};
-      let sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      const table = loadLocalElo();
+      const sorted = Object.entries(table).sort((a, b) => b[1].elo - a[1].elo || b[1].wins - a[1].wins);
       let lowestHighlightedNode = null;
 
-      sortedScores.forEach(([name, score], index) => {
-          let li = document.createElement("li");
-          let extraStats = "";
+      sorted.forEach(([name, row], index) => {
+          const li = document.createElement("li");
+          const left = document.createElement("span");
+          left.textContent = `${index + 1}. ${name}`;
+          const right = document.createElement("div");
+          right.style.cssText = "text-align: right; display: flex; flex-direction: column;";
+          const main = document.createElement("span");
+          main.textContent = `${row.elo} Elo · ${row.wins} 🏆`;
+          right.appendChild(main);
 
-          if (isEndGame && state.players.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
-              let player = state.players.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
-              if ((key === "dondeQueda_scores_local" && state.gameMode === 'local') || 
-                  (key === "dondeQueda_scores_online" && state.gameMode === 'online')) {
-                  li.classList.add("highlight-gold");
-                  lowestHighlightedNode = li;
-                  if (key === "dondeQueda_scores_local" && state.gameMode === 'local') {
-                      let rounds = Math.floor(state.turn / 2); 
-                      let accuracy = Math.round((player.hits / rounds) * 100) || 0;
-                      extraStats = `Esta partida: ${player.hits}/${rounds} aciertos (${accuracy}%)`;
-                  }
-              }
+          const player = isEndGame && state.gameMode === 'local'
+              ? state.players.find((p) => p.name.trim().toLowerCase() === name.toLowerCase())
+              : null;
+          if (player) {
+              li.classList.add("highlight-gold");
+              lowestHighlightedNode = li;
+              const delta = (state.lastEloDeltas || {})[name.toLowerCase()] || 0;
+              const rounds = Math.max(1, Math.floor(state.turn / 2));
+              const accuracy = Math.round((player.hits / rounds) * 100) || 0;
+              const extra = document.createElement("span");
+              extra.style.cssText = "font-size: 0.85rem; color: #94a3b8; margin-top: 2px;";
+              extra.textContent = `${delta >= 0 ? "+" : ""}${delta} Elo · ${player.score} pts · ${player.hits}/${rounds} aciertos (${accuracy}%)`;
+              right.appendChild(extra);
           }
-          
-          li.innerHTML = `
-              <span>${index + 1}. ${name}</span>
-              <div style="text-align: right; display: flex; flex-direction: column;">
-                  <span>${score} pts</span>
-                  ${extraStats ? `<span style="font-size: 0.85rem; color: #94a3b8; margin-top: 2px;">${extraStats}</span>` : ''}
-              </div>
-          `;
+          li.append(left, right); // textContent: los nombres nunca se interpretan como HTML
           listEl.appendChild(li);
       });
       return lowestHighlightedNode;
   };
 
-  const nodeLocal = renderList("dondeQueda_scores_local", UI.leaderboardLocal);
+  const nodeLocal = renderLocalElo(UI.leaderboardLocal);
   // El ranking online sale de la base de datos del servidor (online.js)
   if (UI.leaderboardOnline) renderOnlineRanking(UI.leaderboardOnline);
 
@@ -1016,7 +1066,8 @@ function renderLeaderboard(isEndGame = false) {
 if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", async () => {
   const confirmed = await customConfirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.");
   if (confirmed) {
-    localStorage.removeItem("dondeQueda_scores_local");
+    localStorage.removeItem(LOCAL_ELO_KEY);
+    localStorage.removeItem(OLD_LOCAL_KEY);
     renderLeaderboard(false);
   }
 });
@@ -1059,6 +1110,12 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
       state.resultMap.fitBounds(bounds, { padding: [30, 30] });
   } else {
       L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(state.resultMap);
+      // Zona de acierto: solo se ve en destinos pequeños, donde es más grande que el país
+      if (state.lastShot && state.lastShot.zoneGeometry) {
+          L.geoJSON(state.lastShot.zoneGeometry, {
+              style: { color: "#facc15", weight: 1.5, dashArray: "4, 6", fillOpacity: 0.08, fillColor: "#facc15" },
+          }).addTo(state.resultMapLayers);
+      }
       L.geoJSON(state.targetData, {
           style: { fillColor: isHit ? "#22c55e" : "#ef4444", weight: 2, color: "#ffffff", fillOpacity: 0.8 },
       }).addTo(state.resultMapLayers);

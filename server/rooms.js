@@ -66,6 +66,7 @@ function publicRoom(room) {
       connected: !!p.ws,
       score: p.score,
       hits: p.hits,
+      elo: p.elo,
     })),
   };
 }
@@ -135,7 +136,10 @@ function addPlayer(room, player) {
   if (room.status !== "lobby") throw userError("started", "Esa partida ya ha empezado.");
   if (room.players.size >= CFG.MAX_PLAYERS) throw userError("room_full", "La sala está llena.");
 
-  const p = { id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0 };
+  const p = {
+    id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
+    elo: store.playerElo(player.id).elo, // se enseña en la sala de espera
+  };
   room.players.set(p.id, p);
   player.ws.roomCode = room.code;
   return p;
@@ -360,7 +364,12 @@ function finish(room) {
   room.status = "finished";
   room.phase = null;
   const final = standings(room);
-  store.finishMatch(room.matchId, "finished", final);
+  // Se guarda el resultado y se aplica el Elo; cada jugador recibe su Elo antes y después
+  const elo = store.finishMatch(room.matchId, "finished", final);
+  for (const s of final) {
+    const e = elo[s.id];
+    if (e) Object.assign(s, { eloBefore: e.before, eloAfter: e.after, eloDelta: e.delta });
+  }
   broadcast(room, { t: "finished", matchId: room.matchId, standings: final });
   // La sala se borra al rato; los resultados ya están en la base de datos
   room.timer = setTimeout(() => destroyRoom(room), 60_000);

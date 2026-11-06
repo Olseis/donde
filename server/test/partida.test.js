@@ -113,6 +113,15 @@ class Client {
     assert.strictEqual(fin.standings.reduce((s, p) => s + p.score, 0), total);
     console.log("Clasificación:", fin.standings.map((p) => `${p.position}. ${p.name} ${p.score}`).join(" | "));
 
+    // Elo: todos empiezan en 1000; el primero sube, el último baja y la suma no cambia
+    for (const p of fin.standings) assert.strictEqual(p.eloBefore, 1000);
+    const first = fin.standings[0], last = fin.standings[fin.standings.length - 1];
+    if (first.position !== last.position) {
+      assert(first.eloDelta > 0 && last.eloDelta < 0, "Elo: gana el primero, pierde el último");
+    }
+    assert(Math.abs(fin.standings.reduce((s, p) => s + p.eloDelta, 0)) <= 1, "el Elo se reparte, no se crea");
+    console.log("Elo:", fin.standings.map((p) => `${p.name} ${p.eloAfter} (${p.eloDelta >= 0 ? "+" : ""}${p.eloDelta})`).join(" | "));
+
     // La BD tiene la partida, las 10 rondas y 30 disparos (el segundo de Cris se ignoró)
     const db = require("better-sqlite3")(DB, { readonly: true });
     assert.strictEqual(db.prepare("SELECT status FROM matches WHERE id = ?").get(fin.matchId).status, "finished");
@@ -126,6 +135,8 @@ class Client {
     const ranking = await (await fetch(`http://127.0.0.1:${PORT}/api/online/ranking?playerId=${ana.id}`)).json();
     assert.strictEqual(ranking.ranking.length, 3);
     assert(ranking.ranking.some((r) => r.you && r.name === "Ana"));
+    assert.strictEqual(ranking.ranking[0].name, first.name, "el ranking va por Elo");
+    assert.strictEqual(ranking.ranking[0].elo, first.eloAfter);
     const health = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json();
     assert(health.ok);
 

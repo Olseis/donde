@@ -91,3 +91,22 @@ const citiesData = [
     { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 },
     { name: "Táliga", lat: 38.5267, lng: -7.0147 }
 ];
+/* =======================================
+   MICROESTADOS
+   No vienen en el mapa de países (countries.geo.json), así que shot.js
+   los añade como un círculo con su superficie real (areaKm2).
+   Para acertarlos cuenta la zona de acierto; su tamaño decide el bonus.
+   ======================================= */
+const microstates = [
+    { id: "AND", name: "Andorra", continent: "Europa", lat: 42.5063, lng: 1.5218, areaKm2: 468 },
+    { id: "MCO", name: "Mónaco", continent: "Europa", lat: 43.7384, lng: 7.4246, areaKm2: 2 },
+    { id: "SMR", name: "San Marino", continent: "Europa", lat: 43.9424, lng: 12.4578, areaKm2: 61 },
+    { id: "VAT", name: "Ciudad del Vaticano", continent: "Europa", lat: 41.9029, lng: 12.4534, areaKm2: 0.49 },
+    { id: "LIE", name: "Liechtenstein", continent: "Europa", lat: 47.166, lng: 9.5554, areaKm2: 160 },
+    { id: "SGP", name: "Singapur", continent: "Asia", lat: 1.3521, lng: 103.8198, areaKm2: 728 },
+    { id: "BHR", name: "Baréin", continent: "Asia", lat: 26.0667, lng: 50.5577, areaKm2: 780 },
+];
+microstates.forEach((m) => { dictionary[m.id] = { name: m.name, continent: m.continent }; });
+
+// Malta sí está en el mapa, pero faltaba en el diccionario
+dictionary.MLT = { name: "Malta", continent: "Europa" };

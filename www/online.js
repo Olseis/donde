@@ -310,7 +310,8 @@ function renderWaitingRoom() {
     const li = document.createElement("li");
     const name = document.createElement("span");
     name.textContent =
-      p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "");
+      p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
+      (p.elo ? ` · ${p.elo}` : "");
     const status = document.createElement("span");
     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
     status.className = "room-player-status";
@@ -353,7 +354,7 @@ OUI.btnLeave.addEventListener("click", async () => {
 /* ---------- Rondas ---------- */
 async function loadCountries() {
   const res = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
-  state.countriesGeoJSON = await res.json();
+  state.countriesGeoJSON = DondeShot.withMicrostates(turf, await res.json(), microstates);
 }
 
 function showOnlineRound(msg) {
@@ -414,7 +415,7 @@ function onlineShot(heading) {
 // El servidor confirma tu disparo con los puntos que de verdad cuentan
 function onShotAck(msg) {
   const r = msg.result;
-  UI.turnPointsDisplay.textContent = `+${r.points} puntos`;
+  UI.turnPointsDisplay.textContent = pointsText(r, r.points);
   UI.resultTitle.textContent = r.isHit ? "ACERTASTE ✅" : "FALLASTE ❌";
   UI.resultTitle.style.color = r.isHit ? "#4ade80" : "#f87171";
 }
@@ -439,7 +440,7 @@ function showOnlineRoundResult(msg) {
     if (map) map.style.display = "none";
   }
   if (mine) {
-    UI.turnPointsDisplay.textContent = `+${mine.points} puntos`;
+    UI.turnPointsDisplay.textContent = mine.timedOut ? "+0 puntos" : pointsText(mine, mine.points);
     UI.turnPointsDisplay.style.display = "block";
   }
 
@@ -505,7 +506,11 @@ function renderMatchStandings(standings) {
     const left = document.createElement("span");
     left.textContent = `${s.position}. ${s.name}`;
     const right = document.createElement("span");
-    right.textContent = `${s.score} pts · ${s.hits} aciertos`;
+    // Puntos de la partida y cómo ha cambiado su Elo
+    const d = s.eloDelta;
+    right.textContent = d === undefined
+      ? `${s.score} pts`
+      : `${s.score} pts · Elo ${s.eloAfter} (${d >= 0 ? "+" : ""}${d})`;
     li.append(left, right);
     if (s.id === getPlayerId()) li.classList.add("highlight-gold");
     list.appendChild(li);
@@ -534,7 +539,7 @@ async function renderOnlineRanking(listEl) {
       const left = document.createElement("span");
       left.textContent = `${i + 1}. ${r.name}${r.you ? " (tú)" : ""}`;
       const right = document.createElement("span");
-      right.textContent = `${r.wins} 🏆 · ${r.total_points} pts`;
+      right.textContent = `${r.elo} Elo · ${r.wins} 🏆 · ${r.games} part.`;
       li.append(left, right); // textContent: un nombre nunca se interpreta como HTML
       if (r.you) li.classList.add("highlight-gold");
       listEl.appendChild(li);

@@ -11,10 +11,17 @@
    - match_players  quién jugó cada partida, puntos finales y puesto
    - rounds         el destino de cada ronda
    - shots          cada disparo: rumbo, ubicación y lo que decidió el servidor
+
+   Elo: players.elo / players.elo_games guardan el Elo actual, y
+   match_players.elo_before / elo_after cuánto tenía cada uno antes y
+   después de cada partida (para el historial).
    ======================================= */
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
+
+const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
+const Elo = require(path.join(WWW_DIR, "elo.js"));
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "donde.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -78,6 +85,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status, finished_at);
 `);
 
+/* ---------- Migración: columnas de Elo ----------
+   Las bases de datos creadas antes del Elo no tienen estas columnas.
+   Se añaden y se recalcula el Elo de todas las partidas ya jugadas, en orden. */
+function hasColumn(table, column) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+}
+let needsRecompute = false;
+if (!hasColumn("players", "elo")) {
+  db.exec(`
+    ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
+    ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;
+  `);
+  needsRecompute = true;
+}
+if (!hasColumn("match_players", "elo_before")) {
+  db.exec(`
+    ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
+    ALTER TABLE match_players ADD COLUMN elo_after INTEGER;
+  `);
+  needsRecompute = true;
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_players_elo ON players(elo DESC)");
+
 const q = {
   upsertPlayer: db.prepare(`
     INSERT INTO players (id, name) VALUES (@id, @name)
@@ -105,24 +135,32 @@ const q = {
   closeOrphans: db.prepare(
     "UPDATE matches SET status = 'abandoned', finished_at = datetime('now') WHERE status = 'playing'",
   ),
+  // Ranking online: ordenado por Elo; solo jugadores con al menos una partida terminada
   ranking: db.prepare(`
     SELECT p.name,
-           COUNT(*)                                 AS games,
+           p.elo,
+           p.elo_games                              AS games,
            SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
            SUM(mp.score)                            AS total_points,
            MAX(mp.score)                            AS best_score,
            SUM(mp.hits)                             AS hits,
            SUM(m.total_rounds)                      AS rounds,
-           mp.player_id = @me                       AS you
-    FROM match_players mp
+           p.id = @me                               AS you
+    FROM players p
+    JOIN match_players mp ON mp.player_id = p.id
     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
-    JOIN players p ON p.id = mp.player_id
-    GROUP BY mp.player_id
-    ORDER BY wins DESC, total_points DESC
+    WHERE p.elo_games > 0
+    GROUP BY p.id
+    ORDER BY p.elo DESC, wins DESC
     LIMIT @limit
   `),
+  playerElo: db.prepare("SELECT id, elo, elo_games FROM players WHERE id = ?"),
+  setPlayerElo: db.prepare("UPDATE players SET elo = ?, elo_games = elo_games + 1 WHERE id = ?"),
+  setMatchElo: db.prepare(
+    "UPDATE match_players SET elo_before = ?, elo_after = ? WHERE match_id = ? AND player_id = ?",
+  ),
   history: db.prepare(`
-    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position,
+    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position, mp.elo_before, mp.elo_after,
            (SELECT COUNT(*) FROM match_players x WHERE x.match_id = m.id) AS players
     FROM match_players mp
     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
@@ -134,6 +172,38 @@ const q = {
 
 // Si el servidor se reinició a mitad de partida, esas partidas ya no existen en memoria
 q.closeOrphans.run();
+
+// Aplica el Elo de una partida terminada. Devuelve { playerId: {before, after, delta} }
+function applyElo(matchId, standings) {
+  const players = standings.map((s) => {
+    const row = q.playerElo.get(s.id);
+    return { id: s.id, rating: row ? row.elo : Elo.START, games: row ? row.elo_games : 0, position: s.position };
+  });
+  const out = {};
+  for (const r of Elo.rateMatch(players)) {
+    q.setPlayerElo.run(r.after, r.id);
+    q.setMatchElo.run(r.before, r.after, matchId, r.id);
+    out[r.id] = { before: r.before, after: r.after, delta: r.delta };
+  }
+  return out;
+}
+
+// Vuelve a calcular el Elo de todos desde cero, partida a partida (solo al migrar)
+const recomputeElo = db.transaction(() => {
+  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0`).run();
+  const matches = db
+    .prepare("SELECT id FROM matches WHERE status = 'finished' ORDER BY finished_at, id")
+    .all();
+  const standingsOf = db.prepare(
+    "SELECT player_id AS id, position FROM match_players WHERE match_id = ? AND position IS NOT NULL",
+  );
+  for (const m of matches) applyElo(m.id, standingsOf.all(m.id));
+  return matches.length;
+});
+if (needsRecompute) {
+  const n = recomputeElo();
+  if (n) console.log(`Elo recalculado a partir de ${n} partidas ya jugadas`);
+}
 
 module.exports = {
   db,
@@ -155,12 +225,21 @@ module.exports = {
     q.insertShot.run({ ...row, isHit: row.isHit ? 1 : 0 });
   },
 
+  // Cierra la partida. Si terminó de verdad (no abandonada), aplica el Elo y lo devuelve
   finishMatch: db.transaction((matchId, status, standings) => {
     for (const s of standings) {
       q.updateMatchPlayer.run(s.score, s.hits, s.position ?? null, matchId, s.id);
     }
     q.finishMatch.run(status, matchId);
+    return status === "finished" ? applyElo(matchId, standings) : {};
   }),
+
+  playerElo(playerId) {
+    const row = q.playerElo.get(playerId);
+    return row ? { elo: row.elo, games: row.elo_games } : { elo: Elo.START, games: 0 };
+  },
+
+  recomputeElo,
 
   ranking(limit, me) {
     return q.ranking.all({ limit, me: me || "" }).map((r) => ({ ...r, you: !!r.you }));

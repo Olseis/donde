@@ -14,7 +14,7 @@ const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
 const COUNTRIES_PATH =
   process.env.COUNTRIES_PATH || path.join(__dirname, "data", "countries.geo.json");
 
-const { judgeShot } = require(path.join(WWW_DIR, "shot.js"));
+const { judgeShot, withMicrostates, tooClose } = require(path.join(WWW_DIR, "shot.js"));
 
 // data.js es un script de navegador con "const dictionary = {...}".
 // Lo ejecutamos en una caja aislada y le pedimos que nos devuelva las dos variables.
@@ -22,14 +22,14 @@ function loadGameData() {
   const code = fs.readFileSync(path.join(WWW_DIR, "data.js"), "utf8");
   const sandbox = vm.createContext({});
   return vm.runInContext(
-    `${code}\n;({ dictionary, citiesData: typeof citiesData !== "undefined" ? citiesData : [] })`,
+    `${code}\n;({ dictionary, citiesData: typeof citiesData !== "undefined" ? citiesData : [], microstates: typeof microstates !== "undefined" ? microstates : [] })`,
     sandbox,
     { timeout: 1000 },
   );
 }
 
-const { dictionary, citiesData } = loadGameData();
-const countries = JSON.parse(fs.readFileSync(COUNTRIES_PATH, "utf8"));
+const { dictionary, citiesData, microstates } = loadGameData();
+const countries = withMicrostates(turf, JSON.parse(fs.readFileSync(COUNTRIES_PATH, "utf8")), microstates);
 const countriesById = new Map(countries.features.map((f) => [f.id, f]));
 
 const REGIONS = ["Todos", "América", "Europa", "Asia", "África", "Oceanía", "España"];
@@ -66,7 +66,9 @@ function shuffle(list) {
  */
 function pickTargets(region, playerLocations, count) {
   if (modeForRegion(region) === "spain") {
-    return takeWithoutRepeats(citiesData, count, (c) => c.name).map((c) => ({
+    const near = (c) => playerLocations.some((loc) => tooClose(turf, "spain", loc, [c.lng, c.lat]));
+    const cities = citiesData.filter((c) => !near(c));
+    return takeWithoutRepeats(cities.length ? cities : citiesData, count, (c) => c.name).map((c) => ({
       kind: "city",
       name: c.name,
       lat: c.lat,
@@ -80,8 +82,10 @@ function pickTargets(region, playerLocations, count) {
       const info = dictionary[f.id];
       if (!info) return false;
       if (excluded.has(f.id)) return false;
-      if (region === "Todos") return f.id !== "ESP";
-      return info.continent === region;
+      if (region === "Todos" ? f.id === "ESP" : info.continent !== region) return false;
+      // Nada que esté tan cerca de algún jugador que se acierte apuntando a cualquier lado
+      const center = turf.centroid(f).geometry.coordinates;
+      return !playerLocations.some((loc) => tooClose(turf, "world", loc, center));
     })
     .map((f) => f.id);
 
@@ -112,7 +116,7 @@ function judge(target, userLocation, heading) {
   const mode = target.kind === "city" ? "spain" : "world";
   const geoTarget = mode === "spain" ? target : countriesById.get(target.id);
   const r = judgeShot({ turf, userLocation, heading, mode, target: geoTarget });
-  return { isHit: r.isHit, points: r.points, minDistanceKm: r.minDistanceKm };
+  return { isHit: r.isHit, points: r.points, maxPoints: r.maxPoints, bonus: r.bonus, minDistanceKm: r.minDistanceKm };
 }
 
 module.exports = { REGIONS, pickTargets, judge, countryAt, modeForRegion };
