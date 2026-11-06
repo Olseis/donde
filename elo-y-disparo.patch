@@ -1,0 +1,1056 @@
+From 2e65b7050405a265de61a23d47559ecd3c811294 Mon Sep 17 00:00:00 2001
+From: Raoul Labrunie <rlabrunieespinosa@gmail.com>
+Date: Fri, 6 Nov 2026 10:24:08 +0100
+Subject: [PATCH] =?UTF-8?q?New:=20Elo,=20rayo=20por=20c=C3=ADrculo=20m?=
+ =?UTF-8?q?=C3=A1ximo,=20zona=20de=20acierto=20y=20bonus=20por=20tama?=
+ =?UTF-8?q?=C3=B1o?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- El rayo sigue un círculo máximo (lo que señala la brújula). Antes era una
+  línea de rumbo constante y Japón, Australia o EE. UU. eran imposibles.
+- Zona de acierto mínima para países pequeños y ciudades, que crece con la distancia.
+- Bonus por tamaño aparente: 100 los grandes, hasta 400 los pequeños y lejanos.
+- Microestados (Andorra, Mónaco, San Marino, Vaticano, Liechtenstein, Singapur,
+  Baréin) y Malta.
+- No se eligen destinos demasiado cerca del jugador (el Vaticano desde Roma).
+- Ranking online y local por Elo (www/elo.js, compartido). Migración de la BD
+  que recalcula el Elo de las partidas ya jugadas.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PoXBcbacCKFxXiwBt5sAEc
+---
+ deploy/actualizar.sh        |   2 +-
+ server/db.js                |  93 ++++++++++++--
+ server/game.js              |  20 +--
+ server/rooms.js             |  13 +-
+ server/test/partida.test.js |  11 ++
+ www/app.js                  | 143 +++++++++++++++-------
+ www/data.js                 |  21 +++-
+ www/elo.js                  |  58 +++++++++
+ www/index.html              |   5 +-
+ www/online.js               |  17 ++-
+ www/shot.js                 | 237 ++++++++++++++++++++++++++----------
+ 11 files changed, 484 insertions(+), 136 deletions(-)
+ create mode 100644 www/elo.js
+
+diff --git a/deploy/actualizar.sh b/deploy/actualizar.sh
+index 2672884..b0548de 100755
+--- a/deploy/actualizar.sh
++++ b/deploy/actualizar.sh
+@@ -34,7 +34,7 @@ main() {
+ 
+   # ¿Ha cambiado algo del servidor?
+   local changed
+-  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js || true)
++  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js www/elo.js || true)
+   if [ -n "$changed" ]; then
+     if git diff --name-only "$before" "$after" | grep -q '^server/package'; then
+       echo "  Dependencias nuevas → npm ci"
+diff --git a/server/db.js b/server/db.js
+index 88374f4..846df42 100644
+--- a/server/db.js
++++ b/server/db.js
+@@ -11,11 +11,18 @@
+    - match_players  quién jugó cada partida, puntos finales y puesto
+    - rounds         el destino de cada ronda
+    - shots          cada disparo: rumbo, ubicación y lo que decidió el servidor
++
++   Elo: players.elo / players.elo_games guardan el Elo actual, y
++   match_players.elo_before / elo_after cuánto tenía cada uno antes y
++   después de cada partida (para el historial).
+    ======================================= */
+ const fs = require("fs");
+ const path = require("path");
+ const Database = require("better-sqlite3");
+ 
++const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
++const Elo = require(path.join(WWW_DIR, "elo.js"));
++
+ const DB_PATH = process.env.DB_PATH || path.join(__dirname, "donde.db");
+ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+ 
+@@ -78,6 +85,29 @@ db.exec(`
+   CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status, finished_at);
+ `);
+ 
++/* ---------- Migración: columnas de Elo ----------
++   Las bases de datos creadas antes del Elo no tienen estas columnas.
++   Se añaden y se recalcula el Elo de todas las partidas ya jugadas, en orden. */
++function hasColumn(table, column) {
++  return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
++}
++let needsRecompute = false;
++if (!hasColumn("players", "elo")) {
++  db.exec(`
++    ALTER TABLE players ADD COLUMN elo INTEGER NOT NULL DEFAULT ${Elo.START};
++    ALTER TABLE players ADD COLUMN elo_games INTEGER NOT NULL DEFAULT 0;
++  `);
++  needsRecompute = true;
++}
++if (!hasColumn("match_players", "elo_before")) {
++  db.exec(`
++    ALTER TABLE match_players ADD COLUMN elo_before INTEGER;
++    ALTER TABLE match_players ADD COLUMN elo_after INTEGER;
++  `);
++  needsRecompute = true;
++}
++db.exec("CREATE INDEX IF NOT EXISTS idx_players_elo ON players(elo DESC)");
++
+ const q = {
+   upsertPlayer: db.prepare(`
+     INSERT INTO players (id, name) VALUES (@id, @name)
+@@ -105,24 +135,32 @@ const q = {
+   closeOrphans: db.prepare(
+     "UPDATE matches SET status = 'abandoned', finished_at = datetime('now') WHERE status = 'playing'",
+   ),
++  // Ranking online: ordenado por Elo; solo jugadores con al menos una partida terminada
+   ranking: db.prepare(`
+     SELECT p.name,
+-           COUNT(*)                                 AS games,
++           p.elo,
++           p.elo_games                              AS games,
+            SUM(CASE WHEN mp.position = 1 THEN 1 ELSE 0 END) AS wins,
+            SUM(mp.score)                            AS total_points,
+            MAX(mp.score)                            AS best_score,
+            SUM(mp.hits)                             AS hits,
+            SUM(m.total_rounds)                      AS rounds,
+-           mp.player_id = @me                       AS you
+-    FROM match_players mp
++           p.id = @me                               AS you
++    FROM players p
++    JOIN match_players mp ON mp.player_id = p.id
+     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
+-    JOIN players p ON p.id = mp.player_id
+-    GROUP BY mp.player_id
+-    ORDER BY wins DESC, total_points DESC
++    WHERE p.elo_games > 0
++    GROUP BY p.id
++    ORDER BY p.elo DESC, wins DESC
+     LIMIT @limit
+   `),
++  playerElo: db.prepare("SELECT id, elo, elo_games FROM players WHERE id = ?"),
++  setPlayerElo: db.prepare("UPDATE players SET elo = ?, elo_games = elo_games + 1 WHERE id = ?"),
++  setMatchElo: db.prepare(
++    "UPDATE match_players SET elo_before = ?, elo_after = ? WHERE match_id = ? AND player_id = ?",
++  ),
+   history: db.prepare(`
+-    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position,
++    SELECT m.id, m.region, m.finished_at, mp.score, mp.hits, mp.position, mp.elo_before, mp.elo_after,
+            (SELECT COUNT(*) FROM match_players x WHERE x.match_id = m.id) AS players
+     FROM match_players mp
+     JOIN matches m ON m.id = mp.match_id AND m.status = 'finished'
+@@ -135,6 +173,38 @@ const q = {
+ // Si el servidor se reinició a mitad de partida, esas partidas ya no existen en memoria
+ q.closeOrphans.run();
+ 
++// Aplica el Elo de una partida terminada. Devuelve { playerId: {before, after, delta} }
++function applyElo(matchId, standings) {
++  const players = standings.map((s) => {
++    const row = q.playerElo.get(s.id);
++    return { id: s.id, rating: row ? row.elo : Elo.START, games: row ? row.elo_games : 0, position: s.position };
++  });
++  const out = {};
++  for (const r of Elo.rateMatch(players)) {
++    q.setPlayerElo.run(r.after, r.id);
++    q.setMatchElo.run(r.before, r.after, matchId, r.id);
++    out[r.id] = { before: r.before, after: r.after, delta: r.delta };
++  }
++  return out;
++}
++
++// Vuelve a calcular el Elo de todos desde cero, partida a partida (solo al migrar)
++const recomputeElo = db.transaction(() => {
++  db.prepare(`UPDATE players SET elo = ${Elo.START}, elo_games = 0`).run();
++  const matches = db
++    .prepare("SELECT id FROM matches WHERE status = 'finished' ORDER BY finished_at, id")
++    .all();
++  const standingsOf = db.prepare(
++    "SELECT player_id AS id, position FROM match_players WHERE match_id = ? AND position IS NOT NULL",
++  );
++  for (const m of matches) applyElo(m.id, standingsOf.all(m.id));
++  return matches.length;
++});
++if (needsRecompute) {
++  const n = recomputeElo();
++  if (n) console.log(`Elo recalculado a partir de ${n} partidas ya jugadas`);
++}
++
+ module.exports = {
+   db,
+   savePlayer(id, name) {
+@@ -155,13 +225,22 @@ module.exports = {
+     q.insertShot.run({ ...row, isHit: row.isHit ? 1 : 0 });
+   },
+ 
++  // Cierra la partida. Si terminó de verdad (no abandonada), aplica el Elo y lo devuelve
+   finishMatch: db.transaction((matchId, status, standings) => {
+     for (const s of standings) {
+       q.updateMatchPlayer.run(s.score, s.hits, s.position ?? null, matchId, s.id);
+     }
+     q.finishMatch.run(status, matchId);
++    return status === "finished" ? applyElo(matchId, standings) : {};
+   }),
+ 
++  playerElo(playerId) {
++    const row = q.playerElo.get(playerId);
++    return row ? { elo: row.elo, games: row.elo_games } : { elo: Elo.START, games: 0 };
++  },
++
++  recomputeElo,
++
+   ranking(limit, me) {
+     return q.ranking.all({ limit, me: me || "" }).map((r) => ({ ...r, you: !!r.you }));
+   },
+diff --git a/server/game.js b/server/game.js
+index 64a1166..3c62002 100644
+--- a/server/game.js
++++ b/server/game.js
+@@ -14,7 +14,7 @@ const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
+ const COUNTRIES_PATH =
+   process.env.COUNTRIES_PATH || path.join(__dirname, "data", "countries.geo.json");
+ 
+-const { judgeShot } = require(path.join(WWW_DIR, "shot.js"));
++const { judgeShot, withMicrostates, tooClose } = require(path.join(WWW_DIR, "shot.js"));
+ 
+ // data.js es un script de navegador con "const dictionary = {...}".
+ // Lo ejecutamos en una caja aislada y le pedimos que nos devuelva las dos variables.
+@@ -22,14 +22,14 @@ function loadGameData() {
+   const code = fs.readFileSync(path.join(WWW_DIR, "data.js"), "utf8");
+   const sandbox = vm.createContext({});
+   return vm.runInContext(
+-    `${code}\n;({ dictionary, citiesData: typeof citiesData !== "undefined" ? citiesData : [] })`,
++    `${code}\n;({ dictionary, citiesData: typeof citiesData !== "undefined" ? citiesData : [], microstates: typeof microstates !== "undefined" ? microstates : [] })`,
+     sandbox,
+     { timeout: 1000 },
+   );
+ }
+ 
+-const { dictionary, citiesData } = loadGameData();
+-const countries = JSON.parse(fs.readFileSync(COUNTRIES_PATH, "utf8"));
++const { dictionary, citiesData, microstates } = loadGameData();
++const countries = withMicrostates(turf, JSON.parse(fs.readFileSync(COUNTRIES_PATH, "utf8")), microstates);
+ const countriesById = new Map(countries.features.map((f) => [f.id, f]));
+ 
+ const REGIONS = ["Todos", "América", "Europa", "Asia", "África", "Oceanía", "España"];
+@@ -66,7 +66,9 @@ function shuffle(list) {
+  */
+ function pickTargets(region, playerLocations, count) {
+   if (modeForRegion(region) === "spain") {
+-    return takeWithoutRepeats(citiesData, count, (c) => c.name).map((c) => ({
++    const near = (c) => playerLocations.some((loc) => tooClose(turf, "spain", loc, [c.lng, c.lat]));
++    const cities = citiesData.filter((c) => !near(c));
++    return takeWithoutRepeats(cities.length ? cities : citiesData, count, (c) => c.name).map((c) => ({
+       kind: "city",
+       name: c.name,
+       lat: c.lat,
+@@ -80,8 +82,10 @@ function pickTargets(region, playerLocations, count) {
+       const info = dictionary[f.id];
+       if (!info) return false;
+       if (excluded.has(f.id)) return false;
+-      if (region === "Todos") return f.id !== "ESP";
+-      return info.continent === region;
++      if (region === "Todos" ? f.id === "ESP" : info.continent !== region) return false;
++      // Nada que esté tan cerca de algún jugador que se acierte apuntando a cualquier lado
++      const center = turf.centroid(f).geometry.coordinates;
++      return !playerLocations.some((loc) => tooClose(turf, "world", loc, center));
+     })
+     .map((f) => f.id);
+ 
+@@ -112,7 +116,7 @@ function judge(target, userLocation, heading) {
+   const mode = target.kind === "city" ? "spain" : "world";
+   const geoTarget = mode === "spain" ? target : countriesById.get(target.id);
+   const r = judgeShot({ turf, userLocation, heading, mode, target: geoTarget });
+-  return { isHit: r.isHit, points: r.points, minDistanceKm: r.minDistanceKm };
++  return { isHit: r.isHit, points: r.points, maxPoints: r.maxPoints, bonus: r.bonus, minDistanceKm: r.minDistanceKm };
+ }
+ 
+ module.exports = { REGIONS, pickTargets, judge, countryAt, modeForRegion };
+diff --git a/server/rooms.js b/server/rooms.js
+index 9f8e4a0..fd77d0d 100644
+--- a/server/rooms.js
++++ b/server/rooms.js
+@@ -66,6 +66,7 @@ function publicRoom(room) {
+       connected: !!p.ws,
+       score: p.score,
+       hits: p.hits,
++      elo: p.elo,
+     })),
+   };
+ }
+@@ -135,7 +136,10 @@ function addPlayer(room, player) {
+   if (room.status !== "lobby") throw userError("started", "Esa partida ya ha empezado.");
+   if (room.players.size >= CFG.MAX_PLAYERS) throw userError("room_full", "La sala está llena.");
+ 
+-  const p = { id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0 };
++  const p = {
++    id: player.id, name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
++    elo: store.playerElo(player.id).elo, // se enseña en la sala de espera
++  };
+   room.players.set(p.id, p);
+   player.ws.roomCode = room.code;
+   return p;
+@@ -360,7 +364,12 @@ function finish(room) {
+   room.status = "finished";
+   room.phase = null;
+   const final = standings(room);
+-  store.finishMatch(room.matchId, "finished", final);
++  // Se guarda el resultado y se aplica el Elo; cada jugador recibe su Elo antes y después
++  const elo = store.finishMatch(room.matchId, "finished", final);
++  for (const s of final) {
++    const e = elo[s.id];
++    if (e) Object.assign(s, { eloBefore: e.before, eloAfter: e.after, eloDelta: e.delta });
++  }
+   broadcast(room, { t: "finished", matchId: room.matchId, standings: final });
+   // La sala se borra al rato; los resultados ya están en la base de datos
+   room.timer = setTimeout(() => destroyRoom(room), 60_000);
+diff --git a/server/test/partida.test.js b/server/test/partida.test.js
+index 27008bf..0246ff7 100644
+--- a/server/test/partida.test.js
++++ b/server/test/partida.test.js
+@@ -113,6 +113,15 @@ class Client {
+     assert.strictEqual(fin.standings.reduce((s, p) => s + p.score, 0), total);
+     console.log("Clasificación:", fin.standings.map((p) => `${p.position}. ${p.name} ${p.score}`).join(" | "));
+ 
++    // Elo: todos empiezan en 1000; el primero sube, el último baja y la suma no cambia
++    for (const p of fin.standings) assert.strictEqual(p.eloBefore, 1000);
++    const first = fin.standings[0], last = fin.standings[fin.standings.length - 1];
++    if (first.position !== last.position) {
++      assert(first.eloDelta > 0 && last.eloDelta < 0, "Elo: gana el primero, pierde el último");
++    }
++    assert(Math.abs(fin.standings.reduce((s, p) => s + p.eloDelta, 0)) <= 1, "el Elo se reparte, no se crea");
++    console.log("Elo:", fin.standings.map((p) => `${p.name} ${p.eloAfter} (${p.eloDelta >= 0 ? "+" : ""}${p.eloDelta})`).join(" | "));
++
+     // La BD tiene la partida, las 10 rondas y 30 disparos (el segundo de Cris se ignoró)
+     const db = require("better-sqlite3")(DB, { readonly: true });
+     assert.strictEqual(db.prepare("SELECT status FROM matches WHERE id = ?").get(fin.matchId).status, "finished");
+@@ -126,6 +135,8 @@ class Client {
+     const ranking = await (await fetch(`http://127.0.0.1:${PORT}/api/online/ranking?playerId=${ana.id}`)).json();
+     assert.strictEqual(ranking.ranking.length, 3);
+     assert(ranking.ranking.some((r) => r.you && r.name === "Ana"));
++    assert.strictEqual(ranking.ranking[0].name, first.name, "el ranking va por Elo");
++    assert.strictEqual(ranking.ranking[0].elo, first.eloAfter);
+     const health = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json();
+     assert(health.ok);
+ 
+diff --git a/www/app.js b/www/app.js
+index 3db3b34..168c6bf 100644
+--- a/www/app.js
++++ b/www/app.js
+@@ -521,7 +521,8 @@ async function loadAssetsAndPrepareLoc() {
+ 
+     try {
+       let geoRes = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
+-      state.countriesGeoJSON = await geoRes.json();
++      // Se añaden los microestados (Andorra, Mónaco...), que no vienen en el mapa
++      state.countriesGeoJSON = DondeShot.withMicrostates(turf, await geoRes.json(), microstates);
+     } catch (error) {
+       alert("Error al descargar mapas. Revisa tu conexión.");
+       goToRegionSelect();
+@@ -815,7 +816,8 @@ function startNewRound() {
+           alert("Error crítico: Faltan los datos de las ciudades de España. Asegúrate de haber actualizado el archivo 'data.js'.");
+           return;
+       }
+-      let validCities = citiesData;
++      let validCities = citiesData.filter((c) => !DondeShot.tooClose(turf, 'spain', state.userLocation, [c.lng, c.lat]));
++      if (!validCities.length) validCities = citiesData;
+       if (validCities.length > 1) {
+           validCities = validCities.filter((c) => c.name !== previousId);
+       }
+@@ -828,8 +830,9 @@ function startNewRound() {
+         if (!inDict) return false;
+         if (state.continent === "Todos" && f.id === "ESP") return false;
+         if (f.id === state.userCountryId) return false; 
+-        if (state.continent === "Todos") return true;
+-        return inDict.continent === state.continent;
++        if (state.continent !== "Todos" && inDict.continent !== state.continent) return false;
++        // Nada que esté tan cerca que se acierte apuntando a cualquier lado (el Vaticano desde Roma)
++        return !DondeShot.tooClose(turf, 'world', state.userLocation, turf.centroid(f).geometry.coordinates);
+       });
+ 
+       if (validCountries.length > 1) {
+@@ -843,6 +846,13 @@ function startNewRound() {
+   }
+ }
+ 
++// "+200 puntos (bonus +100)" en un acierto con bonus; si fallas, lo que valía
++function pointsText(shot, points) {
++  if (shot.isHit && shot.bonus > 0) return `+${points} puntos (bonus +${shot.bonus})`;
++  if (!shot.isHit && shot.maxPoints > shot.points) return `+${points} puntos · acertar valía ${shot.maxPoints}`;
++  return `+${points} puntos`;
++}
++
+ const btnConfirmGame = document.getElementById("btn-confirm");
+ if (btnConfirmGame) {
+     btnConfirmGame.addEventListener("click", () => {
+@@ -858,6 +868,7 @@ if (btnConfirmGame) {
+       });
+       const isHit = shot.isHit;
+       if (state.mode === 'spain') state.targetData.polygonGeometry = shot.targetGeometry;
++      state.lastShot = shot; // el mapa del resultado dibuja la zona de acierto
+ 
+       let turnPoints = state.gameMode === 'classic' ? 0 : shot.points;
+ 
+@@ -880,7 +891,7 @@ if (btnConfirmGame) {
+           if (state.gameMode === 'classic') {
+             UI.turnPointsDisplay.style.display = "none";
+           } else {
+-            UI.turnPointsDisplay.textContent = `+${turnPoints} puntos`;
++            UI.turnPointsDisplay.textContent = pointsText(shot, turnPoints);
+             UI.turnPointsDisplay.style.display = "block";
+           }
+       }
+@@ -924,17 +935,55 @@ if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
+ /* =======================================
+    LEADERBOARD Y PUNTUACIONES 
+    ======================================= */
++/* Ranking local por Elo (elo.js). Se guarda en el móvil:
++   dondeQueda_elo_local = { "Nombre": { elo, games, wins, best } }
++   Los nombres del ranking antiguo (mejor puntuación) se conservan con 1000 de Elo. */
++const LOCAL_ELO_KEY = "dondeQueda_elo_local";
++const OLD_LOCAL_KEY = "dondeQueda_scores_local";
++
++function loadLocalElo() {
++  let table = null;
++  try { table = JSON.parse(localStorage.getItem(LOCAL_ELO_KEY)); } catch {}
++  if (table) return table;
++  table = {};
++  try {
++    const old = JSON.parse(localStorage.getItem(OLD_LOCAL_KEY)) || {};
++    Object.entries(old).forEach(([name, best]) => {
++      table[name] = { elo: DondeElo.START, games: 0, wins: 0, best: best || 0 };
++    });
++  } catch {}
++  return table;
++}
++
++// Busca el nombre sin distinguir mayúsculas, para no duplicar a "ana" y "Ana"
++function localEloKey(table, name) {
++  return Object.keys(table).find((k) => k.toLowerCase() === name.toLowerCase()) || name;
++}
++
+ function saveScores(type) {
+-  const key = type === 'local' ? "dondeQueda_scores_local" : "dondeQueda_scores_online";
+-  let scores = JSON.parse(localStorage.getItem(key)) || {};
+-  state.players.forEach((p) => {
+-    let nameToSave = p.name.trim();
+-    if (nameToSave === "") return;
+-    let existingKey = Object.keys(scores).find((k) => k.toLowerCase() === nameToSave.toLowerCase());
+-    let keyToUse = existingKey || nameToSave;
+-    if (!scores[keyToUse] || p.score > scores[keyToUse]) scores[keyToUse] = p.score;
++  if (type !== 'local') return;
++  const table = loadLocalElo();
++  const players = state.players.filter((p) => p.name.trim());
++  // Puesto de cada uno: más puntos gana; a igualdad, más aciertos; si no, empate
++  const ranked = players.map((p) => ({ p, key: localEloKey(table, p.name.trim()) }));
++  ranked.forEach((r) => {
++    r.position = 1 + ranked.filter((o) => o.p.score > r.p.score || (o.p.score === r.p.score && o.p.hits > r.p.hits)).length;
++    if (!table[r.key]) table[r.key] = { elo: DondeElo.START, games: 0, wins: 0, best: 0 };
+   });
+-  localStorage.setItem(key, JSON.stringify(scores));
++  const result = DondeElo.rateMatch(ranked.map((r) => ({
++    id: r.key, rating: table[r.key].elo, games: table[r.key].games, position: r.position,
++  })));
++  state.lastEloDeltas = {};
++  result.forEach((res) => {
++    const r = ranked.find((x) => x.key === res.id);
++    const row = table[res.id];
++    row.elo = res.after;
++    row.games += 1;
++    if (r.position === 1 && ranked.some((o) => o.position > 1)) row.wins += 1;
++    row.best = Math.max(row.best || 0, r.p.score);
++    state.lastEloDeltas[res.id.toLowerCase()] = res.delta;
++  });
++  localStorage.setItem(LOCAL_ELO_KEY, JSON.stringify(table));
+ }
+ 
+ function renderLeaderboard(isEndGame = false) {
+@@ -958,43 +1007,44 @@ function renderLeaderboard(isEndGame = false) {
+       }
+   }
+ 
+-  const renderList = (key, listEl) => {
++  // Ranking local: ordenado por Elo
++  const renderLocalElo = (listEl) => {
+       if(!listEl) return null;
+-      let scores = JSON.parse(localStorage.getItem(key)) || {};
+-      let sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
++      const table = loadLocalElo();
++      const sorted = Object.entries(table).sort((a, b) => b[1].elo - a[1].elo || b[1].wins - a[1].wins);
+       let lowestHighlightedNode = null;
+ 
+-      sortedScores.forEach(([name, score], index) => {
+-          let li = document.createElement("li");
+-          let extraStats = "";
+-
+-          if (isEndGame && state.players.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+-              let player = state.players.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+-              if ((key === "dondeQueda_scores_local" && state.gameMode === 'local') || 
+-                  (key === "dondeQueda_scores_online" && state.gameMode === 'online')) {
+-                  li.classList.add("highlight-gold");
+-                  lowestHighlightedNode = li;
+-                  if (key === "dondeQueda_scores_local" && state.gameMode === 'local') {
+-                      let rounds = Math.floor(state.turn / 2); 
+-                      let accuracy = Math.round((player.hits / rounds) * 100) || 0;
+-                      extraStats = `Esta partida: ${player.hits}/${rounds} aciertos (${accuracy}%)`;
+-                  }
+-              }
++      sorted.forEach(([name, row], index) => {
++          const li = document.createElement("li");
++          const left = document.createElement("span");
++          left.textContent = `${index + 1}. ${name}`;
++          const right = document.createElement("div");
++          right.style.cssText = "text-align: right; display: flex; flex-direction: column;";
++          const main = document.createElement("span");
++          main.textContent = `${row.elo} Elo · ${row.wins} 🏆`;
++          right.appendChild(main);
++
++          const player = isEndGame && state.gameMode === 'local'
++              ? state.players.find((p) => p.name.trim().toLowerCase() === name.toLowerCase())
++              : null;
++          if (player) {
++              li.classList.add("highlight-gold");
++              lowestHighlightedNode = li;
++              const delta = (state.lastEloDeltas || {})[name.toLowerCase()] || 0;
++              const rounds = Math.max(1, Math.floor(state.turn / 2));
++              const accuracy = Math.round((player.hits / rounds) * 100) || 0;
++              const extra = document.createElement("span");
++              extra.style.cssText = "font-size: 0.85rem; color: #94a3b8; margin-top: 2px;";
++              extra.textContent = `${delta >= 0 ? "+" : ""}${delta} Elo · ${player.score} pts · ${player.hits}/${rounds} aciertos (${accuracy}%)`;
++              right.appendChild(extra);
+           }
+-          
+-          li.innerHTML = `
+-              <span>${index + 1}. ${name}</span>
+-              <div style="text-align: right; display: flex; flex-direction: column;">
+-                  <span>${score} pts</span>
+-                  ${extraStats ? `<span style="font-size: 0.85rem; color: #94a3b8; margin-top: 2px;">${extraStats}</span>` : ''}
+-              </div>
+-          `;
++          li.append(left, right); // textContent: los nombres nunca se interpretan como HTML
+           listEl.appendChild(li);
+       });
+       return lowestHighlightedNode;
+   };
+ 
+-  const nodeLocal = renderList("dondeQueda_scores_local", UI.leaderboardLocal);
++  const nodeLocal = renderLocalElo(UI.leaderboardLocal);
+   // El ranking online sale de la base de datos del servidor (online.js)
+   if (UI.leaderboardOnline) renderOnlineRanking(UI.leaderboardOnline);
+ 
+@@ -1016,7 +1066,8 @@ function renderLeaderboard(isEndGame = false) {
+ if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", async () => {
+   const confirmed = await customConfirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.");
+   if (confirmed) {
+-    localStorage.removeItem("dondeQueda_scores_local");
++    localStorage.removeItem(LOCAL_ELO_KEY);
++    localStorage.removeItem(OLD_LOCAL_KEY);
+     renderLeaderboard(false);
+   }
+ });
+@@ -1059,6 +1110,12 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
+       state.resultMap.fitBounds(bounds, { padding: [30, 30] });
+   } else {
+       L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(state.resultMap);
++      // Zona de acierto: solo se ve en destinos pequeños, donde es más grande que el país
++      if (state.lastShot && state.lastShot.zoneGeometry) {
++          L.geoJSON(state.lastShot.zoneGeometry, {
++              style: { color: "#facc15", weight: 1.5, dashArray: "4, 6", fillOpacity: 0.08, fillColor: "#facc15" },
++          }).addTo(state.resultMapLayers);
++      }
+       L.geoJSON(state.targetData, {
+           style: { fillColor: isHit ? "#22c55e" : "#ef4444", weight: 2, color: "#ffffff", fillOpacity: 0.8 },
+       }).addTo(state.resultMapLayers);
+diff --git a/www/data.js b/www/data.js
+index 8cfb244..e31b39a 100644
+--- a/www/data.js
++++ b/www/data.js
+@@ -90,4 +90,23 @@ const citiesData = [
+     { name: "Guadalajara", lat: 40.6333, lng: -3.1667 }, { name: "Ciudad Real", lat: 38.9863, lng: -3.9291 },
+     { name: "Melilla", lat: 35.2937, lng: -2.9383 }, { name: "Ceuta", lat: 35.8894, lng: -5.3213 },
+     { name: "Táliga", lat: 38.5267, lng: -7.0147 }
+-];
+\ No newline at end of file
++];
++/* =======================================
++   MICROESTADOS
++   No vienen en el mapa de países (countries.geo.json), así que shot.js
++   los añade como un círculo con su superficie real (areaKm2).
++   Para acertarlos cuenta la zona de acierto; su tamaño decide el bonus.
++   ======================================= */
++const microstates = [
++    { id: "AND", name: "Andorra", continent: "Europa", lat: 42.5063, lng: 1.5218, areaKm2: 468 },
++    { id: "MCO", name: "Mónaco", continent: "Europa", lat: 43.7384, lng: 7.4246, areaKm2: 2 },
++    { id: "SMR", name: "San Marino", continent: "Europa", lat: 43.9424, lng: 12.4578, areaKm2: 61 },
++    { id: "VAT", name: "Ciudad del Vaticano", continent: "Europa", lat: 41.9029, lng: 12.4534, areaKm2: 0.49 },
++    { id: "LIE", name: "Liechtenstein", continent: "Europa", lat: 47.166, lng: 9.5554, areaKm2: 160 },
++    { id: "SGP", name: "Singapur", continent: "Asia", lat: 1.3521, lng: 103.8198, areaKm2: 728 },
++    { id: "BHR", name: "Baréin", continent: "Asia", lat: 26.0667, lng: 50.5577, areaKm2: 780 },
++];
++microstates.forEach((m) => { dictionary[m.id] = { name: m.name, continent: m.continent }; });
++
++// Malta sí está en el mapa, pero faltaba en el diccionario
++dictionary.MLT = { name: "Malta", continent: "Europa" };
+diff --git a/www/elo.js b/www/elo.js
+new file mode 100644
+index 0000000..5f5aabd
+--- /dev/null
++++ b/www/elo.js
+@@ -0,0 +1,58 @@
++/* =======================================
++   SISTEMA ELO (compartido)
++
++   Lo usan el servidor (ranking online) y el móvil (ranking local),
++   así los dos cuentan igual.
++
++   Cómo funciona:
++   - Todo jugador empieza con 1000.
++   - Una partida de N jugadores se cuenta como si cada uno hubiera jugado
++     contra cada uno de los demás: ganas a quien queda por debajo de ti,
++     pierdes con quien queda por encima, empatas si quedáis igual.
++   - Ganar a alguien con más Elo que tú da muchos puntos; ganar a alguien
++     con mucho menos, casi ninguno. Perder funciona al revés.
++   - Los primeros partidos mueven más el Elo (K alto) para que cada
++     jugador llegue rápido a su nivel real.
++   ======================================= */
++(function (root, factory) {
++  if (typeof module === "object" && module.exports) module.exports = factory();
++  else root.DondeElo = factory();
++})(typeof self !== "undefined" ? self : this, function () {
++  const START = 1000;
++
++  // Cuánto se mueve el Elo en una partida, según cuántas lleva el jugador
++  function kFactor(games) {
++    if (games < 10) return 40; // jugador nuevo
++    if (games < 30) return 32;
++    return 24; // veterano
++  }
++
++  // Probabilidad de que A gane a B
++  function expected(ratingA, ratingB) {
++    return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
++  }
++
++  /**
++   * Calcula el Elo nuevo de todos los jugadores de una partida.
++   * @param players [{ id, rating, games, position }]  position: 1 = primero (empates comparten)
++   * @returns [{ id, before, after, delta }]
++   */
++  function rateMatch(players) {
++    const n = players.length;
++    if (n < 2) return players.map((p) => ({ id: p.id, before: p.rating, after: p.rating, delta: 0 }));
++
++    return players.map((a) => {
++      let sum = 0;
++      for (const b of players) {
++        if (b === a) continue;
++        const result = a.position < b.position ? 1 : a.position === b.position ? 0.5 : 0;
++        sum += result - expected(a.rating, b.rating);
++      }
++      // Se divide entre los rivales para que una partida de 6 no mueva 5 veces más que una de 2
++      const delta = Math.round((kFactor(a.games) / (n - 1)) * sum);
++      return { id: a.id, before: a.rating, after: a.rating + delta, delta };
++    });
++  }
++
++  return { START, kFactor, expected, rateMatch };
++});
+diff --git a/www/index.html b/www/index.html
+index 861386d..f4646a3 100644
+--- a/www/index.html
++++ b/www/index.html
+@@ -121,11 +121,11 @@
+ 
+         <div class="leaderboard-tables">
+             <div id="col-local" class="leaderboard-col">
+-                <h3>Local</h3>
++                <h3>Local · Elo</h3>
+                 <ul id="leaderboard-list-local" class="leaderboard-list"></ul>
+             </div>
+             <div id="col-online" class="leaderboard-col">
+-                <h3>Online · mundial</h3>
++                <h3>Online · Elo mundial</h3>
+                 <ul id="leaderboard-list-online" class="leaderboard-list"></ul>
+             </div>
+         </div>
+@@ -304,6 +304,7 @@
+ 
+     <script src="data.js"></script>
+     <script src="shot.js"></script>
++    <script src="elo.js"></script>
+     <script src="app.js"></script>
+     <script src="online.js"></script>
+ </body>
+diff --git a/www/online.js b/www/online.js
+index ad3add8..3c4ba82 100644
+--- a/www/online.js
++++ b/www/online.js
+@@ -310,7 +310,8 @@ function renderWaitingRoom() {
+     const li = document.createElement("li");
+     const name = document.createElement("span");
+     name.textContent =
+-      p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "");
++      p.name + (p.id === room.hostId ? " 👑" : "") + (p.id === getPlayerId() ? " (tú)" : "") +
++      (p.elo ? ` · ${p.elo}` : "");
+     const status = document.createElement("span");
+     status.textContent = !p.connected ? "desconectado" : p.ready ? "✓ listo" : "eligiendo ubicación…";
+     status.className = "room-player-status";
+@@ -353,7 +354,7 @@ OUI.btnLeave.addEventListener("click", async () => {
+ /* ---------- Rondas ---------- */
+ async function loadCountries() {
+   const res = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
+-  state.countriesGeoJSON = await res.json();
++  state.countriesGeoJSON = DondeShot.withMicrostates(turf, await res.json(), microstates);
+ }
+ 
+ function showOnlineRound(msg) {
+@@ -414,7 +415,7 @@ function onlineShot(heading) {
+ // El servidor confirma tu disparo con los puntos que de verdad cuentan
+ function onShotAck(msg) {
+   const r = msg.result;
+-  UI.turnPointsDisplay.textContent = `+${r.points} puntos`;
++  UI.turnPointsDisplay.textContent = pointsText(r, r.points);
+   UI.resultTitle.textContent = r.isHit ? "ACERTASTE ✅" : "FALLASTE ❌";
+   UI.resultTitle.style.color = r.isHit ? "#4ade80" : "#f87171";
+ }
+@@ -439,7 +440,7 @@ function showOnlineRoundResult(msg) {
+     if (map) map.style.display = "none";
+   }
+   if (mine) {
+-    UI.turnPointsDisplay.textContent = `+${mine.points} puntos`;
++    UI.turnPointsDisplay.textContent = mine.timedOut ? "+0 puntos" : pointsText(mine, mine.points);
+     UI.turnPointsDisplay.style.display = "block";
+   }
+ 
+@@ -505,7 +506,11 @@ function renderMatchStandings(standings) {
+     const left = document.createElement("span");
+     left.textContent = `${s.position}. ${s.name}`;
+     const right = document.createElement("span");
+-    right.textContent = `${s.score} pts · ${s.hits} aciertos`;
++    // Puntos de la partida y cómo ha cambiado su Elo
++    const d = s.eloDelta;
++    right.textContent = d === undefined
++      ? `${s.score} pts`
++      : `${s.score} pts · Elo ${s.eloAfter} (${d >= 0 ? "+" : ""}${d})`;
+     li.append(left, right);
+     if (s.id === getPlayerId()) li.classList.add("highlight-gold");
+     list.appendChild(li);
+@@ -534,7 +539,7 @@ async function renderOnlineRanking(listEl) {
+       const left = document.createElement("span");
+       left.textContent = `${i + 1}. ${r.name}${r.you ? " (tú)" : ""}`;
+       const right = document.createElement("span");
+-      right.textContent = `${r.wins} 🏆 · ${r.total_points} pts`;
++      right.textContent = `${r.elo} Elo · ${r.wins} 🏆 · ${r.games} part.`;
+       li.append(left, right); // textContent: un nombre nunca se interpreta como HTML
+       if (r.you) li.classList.add("highlight-gold");
+       listEl.appendChild(li);
+diff --git a/www/shot.js b/www/shot.js
+index 67eb78e..fe668f9 100644
+--- a/www/shot.js
++++ b/www/shot.js
+@@ -9,6 +9,20 @@
+      cambiando el JavaScript del móvil.
+ 
+    Coordenadas siempre en formato Turf: [longitud, latitud].
++
++   CÓMO FUNCIONA UN DISPARO
++   1. El rayo sale de tu posición siguiendo un CÍRCULO MÁXIMO, que es
++      lo que de verdad señala una brújula: el camino más corto sobre la
++      esfera. (Antes era una línea de rumbo constante, la "recta" de un
++      mapa plano, y por eso Japón o Australia eran imposibles de acertar
++      apuntando bien.)
++   2. Aciertas si el rayo toca el país/ciudad o pasa por su ZONA DE
++      ACIERTO: un círculo mínimo alrededor del centro, que ayuda a los
++      destinos pequeños y crece un poco con la distancia (la brújula del
++      móvil no es perfecta).
++   3. Los puntos de un acierto dependen de lo PEQUEÑO QUE SE VE el
++      destino desde donde estás: Rusia vale 100 casi siempre; Andorra
++      desde Italia, unos 200; desde México, bastantes más.
+    ======================================= */
+ (function (root, factory) {
+   if (typeof module === "object" && module.exports) {
+@@ -17,26 +31,39 @@
+     root.DondeShot = factory(); // Navegador / app
+   }
+ })(typeof self !== "undefined" ? self : this, function () {
+-  const SPAIN_CITY_RADIUS_KM = 20;
++  /* ---------- Ajustes (cambiar aquí cambia el juego y el servidor) ---------- */
++  const EARTH_KM = 6371.0088;
++  const MAX_RAY_KM = 20015; // media vuelta al mundo: llega a cualquier punto
++
++  // Zona de acierto mínima = un % de la distancia, entre un mínimo y un máximo
++  const ZONE = {
++    world: { minKm: 100, maxKm: 300, pctOfDistance: 0.03 }, // países
++    spain: { minKm: 25, maxKm: 60, pctOfDistance: 0.04 },   // ciudades
++  };
++
++  // Puntos por acierto: 100 × (REF_ANGLE / tamaño aparente) ^ EXPONENT, entre 1× y MAX_MULT×
+   const POINTS_HIT = 100;
+-  const POINTS_MISS_MAX = 75;
++  const REF_ANGLE_DEG = 20; // un destino que se ve más grande que esto vale 100
++  const EXPONENT = 0.27;
++  const MAX_MULT = 4; // como mucho 400 puntos
++  const CITY_SIZE_KM = 20; // "radio" de una ciudad para calcular su tamaño aparente
++  const MIN_SIZE_KM = 5; // Mónaco o el Vaticano cuentan como de 5 km, si no darían 400 desde cualquier sitio
+ 
+-  // Puntos a lo largo de la dirección en la que apunta el jugador
+-  function buildBeamString(turf, origin, heading, maxLength, step, wrapMeridian) {
+-    const pts = [];
+-    for (let d = 0; d <= maxLength; d += step) {
+-      const p = turf.rhumbDestination(origin, d, heading, { units: "kilometers" });
+-      let lng = p.geometry.coordinates[0];
+-      const lat = p.geometry.coordinates[1];
++  const POINTS_MISS_MAX = 75; // fallo: hasta 75 según lo cerca que apuntaste
+ 
+-      if (isNaN(lng) || isNaN(lat)) break;
+-      if (lat > 89.5) { pts.push([lng, 89.5]); break; }
+-      if (lat < -89.5) { pts.push([lng, -89.5]); break; }
++  const rad = (d) => (d * Math.PI) / 180;
++  const deg = (r) => (r * 180) / Math.PI;
+ 
+-      if (wrapMeridian) {
+-        while (lng > 180) lng -= 360;
+-        while (lng < -180) lng += 360;
+-      }
++  /* ---------- Rayo ---------- */
++  // Puntos del círculo máximo que sale de "origin" con el rumbo "heading"
++  function buildBeamString(turf, origin, heading, maxLength, step) {
++    const pts = [];
++    for (let d = 0; d <= maxLength + step / 2; d += step) {
++      const p = turf.destination(origin, Math.min(d, maxLength), heading, { units: "kilometers" });
++      let [lng, lat] = p.geometry.coordinates;
++      if (isNaN(lng) || isNaN(lat)) break;
++      while (lng > 180) lng -= 360;
++      while (lng < -180) lng += 360;
+       pts.push([lng, lat]);
+     }
+     return pts;
+@@ -57,6 +84,47 @@
+     return lines;
+   }
+ 
++  /**
++   * Distancia mínima (km) entre un punto y el rayo (arco de círculo máximo
++   * desde "origin" con rumbo "heading" y longitud "lengthKm").
++   * Fórmulas de distancia transversal y a lo largo del arco.
++   */
++  function distanceToRayKm(turf, origin, heading, lengthKm, point) {
++    const d13 = turf.distance(origin, point, { units: "kilometers" }) / EARTH_KM;
++    const b13 = rad(turf.bearing(origin, point));
++    const dTheta = b13 - rad(heading);
++    const xt = Math.asin(Math.sin(d13) * Math.sin(dTheta)); // transversal (radianes)
++    let at = Math.acos(Math.min(1, Math.max(-1, Math.cos(d13) / Math.cos(xt)))); // a lo largo
++    if (Math.cos(dTheta) < 0) at = -at;
++
++    if (at >= 0 && at * EARTH_KM <= lengthKm) return Math.abs(xt) * EARTH_KM;
++    if (at < 0) return d13 * EARTH_KM; // el punto queda detrás del jugador
++    const end = turf.destination(origin, lengthKm, heading, { units: "kilometers" });
++    return turf.distance(end, point, { units: "kilometers" });
++  }
++
++  /* ---------- Tamaño y puntos ---------- */
++  // Radio de un círculo con la misma superficie que el país
++  function equivalentRadiusKm(turf, feature) {
++    return Math.sqrt(turf.area(feature) / 1e6 / Math.PI);
++  }
++
++  // Ángulo (grados) que ocupa el destino visto desde el jugador
++  function apparentSizeDeg(radiusKm, distanceKm) {
++    if (distanceKm <= radiusKm) return 180; // estás dentro o pegado
++    return deg(2 * Math.atan(radiusKm / distanceKm));
++  }
++
++  function hitPoints(apparentDeg) {
++    const mult = Math.pow(REF_ANGLE_DEG / apparentDeg, EXPONENT);
++    return Math.round(POINTS_HIT * Math.min(MAX_MULT, Math.max(1, mult)));
++  }
++
++  function zoneRadiusKm(mode, distanceKm) {
++    const z = ZONE[mode === "spain" ? "spain" : "world"];
++    return Math.min(z.maxKm, Math.max(z.minKm, distanceKm * z.pctOfDistance));
++  }
++
+   /**
+    * Decide si el disparo acierta y cuántos puntos vale.
+    *
+@@ -67,89 +135,126 @@
+    * @param target        Feature GeoJSON del país, o {name, lat, lng} de la ciudad
+    */
+   function judgeShot({ turf, userLocation, heading, mode, target }) {
+-    let isHit = false;
+-    let beam = null;
+-    let errorLine = null;
+-    let minDistanceKm = 0;
+-    let targetCenter;
+-    let targetGeometry = null;
+-
+-    if (mode === "spain") {
+-      targetCenter = [target.lng, target.lat];
+-      targetGeometry = turf.circle(targetCenter, SPAIN_CITY_RADIUS_KM, { units: "kilometers" });
+-      const distanceToTarget = turf.distance(userLocation, targetCenter, { units: "kilometers" });
+-      const rayLengthKm = Math.min(distanceToTarget + 500, 4000);
++    const isCity = mode === "spain";
++    const targetCenter = isCity ? [target.lng, target.lat] : turf.centroid(target).geometry.coordinates;
++    const distanceKm = turf.distance(userLocation, targetCenter, { units: "kilometers" });
++    const sizeKm = isCity ? CITY_SIZE_KM : equivalentRadiusKm(turf, target);
++    const zoneKm = Math.max(zoneRadiusKm(mode, distanceKm), isCity ? CITY_SIZE_KM : 0);
+ 
+-      const linePoints = buildBeamString(turf, userLocation, heading, rayLengthKm, 20, false);
+-      beam = turf.featureCollection([turf.lineString(linePoints)]);
++    // Rayo: hasta un poco más allá del destino (nunca más de media vuelta)
++    const rayKm = Math.min(distanceKm + Math.max(1500, 2 * sizeKm), MAX_RAY_KM);
++    const linePoints = buildBeamString(turf, userLocation, heading, rayKm, isCity ? 20 : 100);
++    const beam = turf.featureCollection(breakLinesOnMeridian(turf, linePoints));
+ 
+-      if (turf.lineIntersect(beam.features[0], targetGeometry).features.length > 0) isHit = true;
+-      if (turf.booleanPointInPolygon(turf.point(linePoints[0]), targetGeometry)) isHit = true;
++    // 1) ¿Pasa por la zona de acierto alrededor del centro?
++    let isHit = distanceToRayKm(turf, userLocation, heading, rayKm, targetCenter) <= zoneKm;
+ 
+-      if (!isHit) {
+-        minDistanceKm = Math.max(0, distanceToTarget - SPAIN_CITY_RADIUS_KM);
+-        errorLine = turf.lineString([userLocation, targetCenter]);
+-      }
+-    } else {
+-      targetCenter = turf.centroid(target).geometry.coordinates;
+-      targetGeometry = target;
+-      const distanceToTarget = turf.distance(userLocation, targetCenter, { units: "kilometers" });
+-      const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
+-
+-      const linePoints = buildBeamString(turf, userLocation, heading, rayLengthKm, 100, true);
+-      beam = turf.featureCollection(breakLinesOnMeridian(turf, linePoints));
+-
+-      turf.featureEach(turf.flatten(target), (countryPart) => {
+-        turf.featureEach(beam, (linePart) => {
+-          if (turf.lineIntersect(linePart, countryPart).features.length > 0) isHit = true;
+-          const startPoint = turf.point(linePart.geometry.coordinates[0]);
+-          if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
++    // 2) ¿Toca el propio país? (los grandes se salen de la zona)
++    if (!isHit && !isCity) {
++      turf.featureEach(turf.flatten(target), (part) => {
++        if (isHit) return;
++        if (turf.booleanPointInPolygon(turf.point(userLocation), part)) isHit = true;
++        turf.featureEach(beam, (line) => {
++          if (!isHit && turf.lineIntersect(line, part).features.length > 0) isHit = true;
+         });
+       });
++    }
++
++    // Lo que se dibuja en el mapa del resultado
++    const zoneGeometry = turf.circle(targetCenter, zoneKm, { units: "kilometers", steps: 48 });
++    const targetGeometry = isCity ? zoneGeometry : target;
+ 
+-      if (!isHit) {
+-        // El punto del país más cercano al jugador, para la línea amarilla del mapa
+-        let closest = null;
++    // Si falla: distancia al destino y línea amarilla hasta él
++    let minDistanceKm = 0;
++    let errorLine = null;
++    if (!isHit) {
++      let closest = targetCenter;
++      if (isCity) {
++        minDistanceKm = Math.max(0, distanceKm - zoneKm);
++      } else {
+         minDistanceKm = Infinity;
+         const userPt = turf.point(userLocation);
+         turf.featureEach(turf.explode(target), (pointFeature) => {
+           const dist = turf.distance(userPt, pointFeature, { units: "kilometers" });
+           if (dist < minDistanceKm) {
+             minDistanceKm = dist;
+-            closest = pointFeature;
++            closest = pointFeature.geometry.coordinates;
+           }
+         });
+-        if (closest) {
+-          let pt2 = closest.geometry.coordinates;
+-          if (userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
+-          else if (pt2[0] - userLocation[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
+-          errorLine = turf.lineString([userLocation, pt2]);
+-        }
+       }
++      let pt2 = closest;
++      if (userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
++      else if (pt2[0] - userLocation[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
++      errorLine = turf.lineString([userLocation, pt2]);
+     }
+ 
+-    // Si falla, puntos según lo cerca que apuntó del centro (0 si se desvía más de 90°)
+-    const idealBearing = turf.bearing(userLocation, targetCenter);
+-    const bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
+-    let errorAngle = Math.abs((heading % 360) - bearingNorm);
++    // Puntos
++    const bearingIdeal = (turf.bearing(userLocation, targetCenter) + 360) % 360;
++    let errorAngle = Math.abs((((heading % 360) + 360) % 360) - bearingIdeal);
+     if (errorAngle > 180) errorAngle = 360 - errorAngle;
+ 
++    const apparentDeg = apparentSizeDeg(Math.max(MIN_SIZE_KM, sizeKm), distanceKm);
++    const maxPoints = hitPoints(apparentDeg); // lo que vale acertar este destino desde aquí
+     let points;
+-    if (isHit) points = POINTS_HIT;
++    if (isHit) points = maxPoints;
+     else if (errorAngle <= 90) points = Math.round(POINTS_MISS_MAX * (1 - errorAngle / 90));
+     else points = 0;
+ 
+     return {
+       isHit,
+       points,
++      maxPoints,
++      bonus: maxPoints - POINTS_HIT,
+       minDistanceKm: isHit ? 0 : Math.round(minDistanceKm),
+       errorAngle: Math.round(errorAngle),
++      distanceKm: Math.round(distanceKm),
+       beam,
+       errorLine,
+       targetGeometry,
++      // La zona solo se dibuja cuando es más grande que el destino (países pequeños y ciudades)
++      zoneGeometry: isCity || sizeKm < zoneKm ? zoneGeometry : null,
++      zoneKm: Math.round(zoneKm),
+       targetCenter,
+     };
+   }
+ 
+-  return { judgeShot, POINTS_HIT, POINTS_MISS_MAX };
++  /**
++   * ¿Está el destino tan cerca que se acertaría apuntando a cualquier sitio?
++   * (p. ej. el Vaticano jugando desde Roma). Esos destinos no se eligen.
++   */
++  const TOO_CLOSE_KM = { world: 200, spain: 50 };
++  function tooClose(turf, mode, userLocation, center) {
++    if (!userLocation) return false;
++    const limit = TOO_CLOSE_KM[mode === "spain" ? "spain" : "world"];
++    return turf.distance(userLocation, center, { units: "kilometers" }) < limit;
++  }
++
++  /**
++   * Los microestados (Andorra, Mónaco...) no vienen en el mapa de países.
++   * Se añaden como un círculo con su superficie real; para acertarlos
++   * cuenta la zona de acierto, y su tamaño real decide el bonus.
++   */
++  function withMicrostates(turf, countries, list) {
++    if (!countries || !list || !list.length) return countries;
++    const have = new Set(countries.features.map((f) => f.id));
++    for (const m of list) {
++      if (have.has(m.id)) continue;
++      const radiusKm = Math.max(0.3, Math.sqrt(m.areaKm2 / Math.PI));
++      const f = turf.circle([m.lng, m.lat], radiusKm, { units: "kilometers", steps: 24 });
++      f.id = m.id;
++      f.properties = { name: m.name, microstate: true };
++      countries.features.push(f);
++    }
++    return countries;
++  }
++
++  return {
++    judgeShot,
++    withMicrostates,
++    tooClose,
++    hitPoints,
++    apparentSizeDeg,
++    POINTS_HIT,
++    POINTS_MISS_MAX,
++  };
+ });
+-- 
+2.43.0
+

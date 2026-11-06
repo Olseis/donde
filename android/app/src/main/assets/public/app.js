@@ -1,4 +1,30 @@
 /* =======================================
+   MODAL DE CONFIRMACIÓN PERSONALIZADO
+   ======================================= */
+function customConfirm(message) {
+  return new Promise((resolve) => {
+      const overlay = document.getElementById('custom-confirm');
+      document.getElementById('confirm-message').textContent = message;
+      overlay.style.display = 'flex';
+
+      const btnOk = document.getElementById('btn-confirm-ok');
+      const btnCancel = document.getElementById('btn-confirm-cancel');
+
+      const cleanup = () => {
+          btnOk.removeEventListener('click', onOk);
+          btnCancel.removeEventListener('click', onCancel);
+          overlay.style.display = 'none';
+      };
+
+      const onOk = () => { cleanup(); resolve(true); };
+      const onCancel = () => { cleanup(); resolve(false); };
+
+      btnOk.addEventListener('click', onOk);
+      btnCancel.addEventListener('click', onCancel);
+  });
+}
+
+/* =======================================
    CONFIGURACIÓN
    ======================================= */
 const ROUNDS_PER_GAME = 10;
@@ -34,6 +60,7 @@ const COUNTRIES_STYLE = {
 const state = {
   gameMode: 'ranked',
   continent: "Todos",
+  mode: 'world',
   userLocation: null,
   userCountryId: null,
   tempLocation: null,
@@ -71,6 +98,8 @@ const screens = {
   result: document.getElementById("result-screen"),
   midgame: document.getElementById("midgame-screen"),
   summary: document.getElementById("summary-screen"),
+  online: document.getElementById("online-screen"),
+  waiting: document.getElementById("waiting-screen"),
 };
 
 const UI = {
@@ -329,6 +358,7 @@ function showScreen(screenName) {
 }
 
 function returnToMenu() {
+  if (state.gameMode === 'online' && typeof Online !== "undefined") Online.disconnect();
   state.gameMode = null;
   showScreen("start");
 }
@@ -356,7 +386,7 @@ const goToRegionSelect = () => {
    BOTÓN DE RETROCESO FÍSICO DE ANDROID (CAPACITOR)
    ======================================= */
 if (typeof window.Capacitor !== "undefined" && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
-    window.Capacitor.Plugins.App.addListener('backButton', () => {
+    window.Capacitor.Plugins.App.addListener('backButton', async () => {
         const activeScreen = document.querySelector('.screen.active');
         if (!activeScreen) return;
 
@@ -366,12 +396,13 @@ if (typeof window.Capacitor !== "undefined" && window.Capacitor.Plugins && windo
         if (activeId === 'start-screen') {
             window.Capacitor.Plugins.App.exitApp();
         } 
-        // 2. Si estamos en mitad de una partida (salvo modo libre), pide confirmación con el nativo
+        // 2. Si estamos en mitad de una partida (salvo modo libre), pide confirmación con modal personalizado
         else if (['game-screen', 'result-screen', 'midgame-screen', 'location-screen'].includes(activeId)) {
             if (state.gameMode === 'classic' || activeId === 'location-screen') {
                 returnToMenu();
             } else {
-                if (confirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.")) {
+                const wantsToExit = await customConfirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.");
+                if (wantsToExit) {
                     returnToMenu();
                 }
             }
@@ -409,8 +440,9 @@ if(UI.btnCredits) UI.btnCredits.addEventListener("click", () => showScreen("cred
 if(UI.btnCreditsBack) UI.btnCreditsBack.addEventListener("click", returnToMenu);
 if(UI.btnBackProgress) UI.btnBackProgress.addEventListener("click", returnToMenu);
 
-if(UI.btnResetProgress) UI.btnResetProgress.addEventListener("click", () => {
-  if (confirm("¿Seguro que quieres borrar tu progreso? Perderás tu nivel y tus récords.")) {
+if(UI.btnResetProgress) UI.btnResetProgress.addEventListener("click", async () => {
+  const confirmed = await customConfirm("¿Seguro que quieres borrar tu progreso? Perderás tu nivel y tus récords.");
+  if (confirmed) {
     localStorage.removeItem(PROGRESS_KEY);
     renderProgressScreen();
   }
@@ -427,8 +459,14 @@ if(UI.btnConfirmNames) UI.btnConfirmNames.addEventListener("click", () => {
       }
       state.players = [{ name: p1, score: 0, hits: 0 }, { name: p2, score: 0, hits: 0 }];
   } else if (state.gameMode === 'online') {
-      localStorage.setItem("dondeQueda_onlineName", p1);
-      state.players = [{ name: p1, score: 0, hits: 0 }];
+      if (!/^[\p{L}\p{N} _.\-]{1,20}$/u.test(p1)) {
+          alert("Escribe un nombre de 1 a 20 letras o números.");
+          if(UI.inputP1) UI.inputP1.focus();
+          return;
+      }
+      state.currentPlayerIdx = 0; state.turn = 1;
+      openOnlineLobby(p1); // online.js: crear sala o unirse con código
+      return;
   }
   state.currentPlayerIdx = 0; state.turn = 1;
   goToRegionSelect();
@@ -436,7 +474,8 @@ if(UI.btnConfirmNames) UI.btnConfirmNames.addEventListener("click", () => {
 
 if(UI.btnBackNames) UI.btnBackNames.addEventListener("click", returnToMenu);
 if(UI.btnBackRegion) UI.btnBackRegion.addEventListener("click", () => {
-  if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names"); 
+  if (state.gameMode === 'online') showScreen("online");
+  else if (state.gameMode === 'local') showScreen("names"); 
   else returnToMenu();
 });
 
@@ -447,7 +486,17 @@ document.querySelectorAll(".btn-menu").forEach((btn) => {
 
     state.continent = region;
 
-    if (state.gameMode === 'local' || state.gameMode === 'online') {
+    // Online: la sala se crea en el servidor y él nos lleva a elegir ubicación (online.js)
+    if (state.gameMode === 'online') {
+      if(UI.regionSubtitle) UI.regionSubtitle.textContent = "Creando sala...";
+      Online.createRoom(region).catch(() => {
+        alert("No se pudo conectar con el servidor.");
+        showScreen("online");
+      });
+      return;
+    }
+
+    if (state.gameMode === 'local') {
       state.players.forEach((p) => { p.score = 0; p.hits = 0; });
       state.currentPlayerIdx = 0; state.turn = 1;
     } else {
@@ -472,7 +521,8 @@ async function loadAssetsAndPrepareLoc() {
 
     try {
       let geoRes = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
-      state.countriesGeoJSON = await geoRes.json();
+      // Se añaden los microestados (Andorra, Mónaco...), que no vienen en el mapa
+      state.countriesGeoJSON = DondeShot.withMicrostates(turf, await geoRes.json(), microstates);
     } catch (error) {
       alert("Error al descargar mapas. Revisa tu conexión.");
       goToRegionSelect();
@@ -492,11 +542,16 @@ if(UI.btnVersusNew) UI.btnVersusNew.addEventListener("click", () => {
     if (state.gameMode === 'local' || state.gameMode === 'online') showScreen("names");
 });
 
-if(UI.btnBackLoc) UI.btnBackLoc.addEventListener("click", goToRegionSelect);
-if(UI.btnChangeRegion) UI.btnChangeRegion.addEventListener("click", () => {
+if(UI.btnBackLoc) UI.btnBackLoc.addEventListener("click", () => {
+  if (state.gameMode === 'online') { Online.leaveRoom(); showScreen("online"); }
+  else goToRegionSelect();
+});
+
+if(UI.btnChangeRegion) UI.btnChangeRegion.addEventListener("click", async () => {
   if (state.gameMode === 'classic') { goToRegionSelect(); return; }
   
-  if (confirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.")) {
+  const confirmed = await customConfirm("¿Seguro que quieres abandonar la partida? Se perderá el progreso actual.");
+  if (confirmed) {
     if (state.gameMode === 'local' || state.gameMode === 'online') returnToMenu(); else goToRegionSelect();
   }
 });
@@ -549,14 +604,6 @@ function endLocalGame() {
         UI.leaderboardWinnerTitle.style.display = "block";
     }
     saveScores('local'); renderLeaderboard(true); showScreen("leaderboard");
-}
-
-function endOnlineGame() {
-    if(UI.leaderboardWinnerTitle) {
-        UI.leaderboardWinnerTitle.textContent = `¡Partida Terminada!`;
-        UI.leaderboardWinnerTitle.style.display = "block";
-    }
-    saveScores('online'); renderLeaderboard(true); showScreen("leaderboard");
 }
 
 if(UI.btnSummaryAgain) UI.btnSummaryAgain.addEventListener("click", () => { resetSingleGame(); startNewRound(); });
@@ -647,8 +694,15 @@ async function initializeGameSession(source) {
     }
 
     startCompass();
-    startNewRound();
     if(UI.locLoading) UI.locLoading.style.display = "none";
+
+    // Online: no se empieza todavía; se avisa al servidor y se espera al resto
+    if (state.gameMode === 'online') {
+      Online.sendLocation(state.userLocation);
+      showScreen("waiting");
+      return;
+    }
+    startNewRound();
   } catch (error) {
     console.error("Error al arrancar la brújula o mapa:", error);
     alert("Hubo un problema. Asegúrate de tener permisos de ubicación o recarga la página.");
@@ -728,6 +782,7 @@ function handleOrientation(event) {
    LÓGICA DEL JUEGO
    ======================================= */
 function startNewRound() {
+  if (state.gameMode === 'online') return; // en online las rondas las manda el servidor
   showScreen("game");
   if(UI.resultErrorDetails) UI.resultErrorDetails.style.display = "none";
   if(UI.turnPointsDisplay) UI.turnPointsDisplay.style.display = "none";
@@ -761,7 +816,8 @@ function startNewRound() {
           alert("Error crítico: Faltan los datos de las ciudades de España. Asegúrate de haber actualizado el archivo 'data.js'.");
           return;
       }
-      let validCities = citiesData;
+      let validCities = citiesData.filter((c) => !DondeShot.tooClose(turf, 'spain', state.userLocation, [c.lng, c.lat]));
+      if (!validCities.length) validCities = citiesData;
       if (validCities.length > 1) {
           validCities = validCities.filter((c) => c.name !== previousId);
       }
@@ -774,8 +830,9 @@ function startNewRound() {
         if (!inDict) return false;
         if (state.continent === "Todos" && f.id === "ESP") return false;
         if (f.id === state.userCountryId) return false; 
-        if (state.continent === "Todos") return true;
-        return inDict.continent === state.continent;
+        if (state.continent !== "Todos" && inDict.continent !== state.continent) return false;
+        // Nada que esté tan cerca que se acierte apuntando a cualquier lado (el Vaticano desde Roma)
+        return !DondeShot.tooClose(turf, 'world', state.userLocation, turf.centroid(f).geometry.coordinates);
       });
 
       if (validCountries.length > 1) {
@@ -789,118 +846,52 @@ function startNewRound() {
   }
 }
 
+// "+200 puntos (bonus +100)" en un acierto con bonus; si fallas, lo que valía
+function pointsText(shot, points) {
+  if (shot.isHit && shot.bonus > 0) return `+${points} puntos (bonus +${shot.bonus})`;
+  if (!shot.isHit && shot.maxPoints > shot.points) return `+${points} puntos · acertar valía ${shot.maxPoints}`;
+  return `+${points} puntos`;
+}
+
 const btnConfirmGame = document.getElementById("btn-confirm");
 if (btnConfirmGame) {
     btnConfirmGame.addEventListener("click", () => {
       showScreen("result");
 
-      let isHit = false;
-      let exactCollisionBeam = null;
-      let minDistance = Infinity;
-      let errorLine = null;
+      // El cálculo está en shot.js, el mismo archivo que usa el servidor en las partidas online
+      const shot = DondeShot.judgeShot({
+        turf,
+        userLocation: state.userLocation,
+        heading: state.currentHeading,
+        mode: state.mode,
+        target: state.targetData,
+      });
+      const isHit = shot.isHit;
+      if (state.mode === 'spain') state.targetData.polygonGeometry = shot.targetGeometry;
+      state.lastShot = shot; // el mapa del resultado dibuja la zona de acierto
 
-      if (state.mode === 'spain') {
-          let targetPolygon = turf.circle([state.targetData.lng, state.targetData.lat], 20, {units: 'kilometers'});
-          const distanceToTarget = turf.distance(state.userLocation, [state.targetData.lng, state.targetData.lat], {units: 'kilometers'});
-          const rayLengthKm = Math.min(distanceToTarget + 500, 4000); 
-          
-          const linePoints = buildBeamString(rayLengthKm, 20);
-          exactCollisionBeam = turf.featureCollection([turf.lineString(linePoints)]);
-          
-          const intersections = turf.lineIntersect(exactCollisionBeam, targetPolygon);
-          if (intersections.features.length > 0) isHit = true;
-          
-          const startPoint = turf.point(linePoints[0]);
-          if (turf.booleanPointInPolygon(startPoint, targetPolygon)) isHit = true;
-          
-          state.targetData.polygonGeometry = targetPolygon;
-
-          if (!isHit) {
-              minDistance = Math.max(0, distanceToTarget - 20);
-              errorLine = turf.lineString([state.userLocation, [state.targetData.lng, state.targetData.lat]]);
-          }
-      } else {
-          const distanceToTarget = turf.distance(
-            state.userLocation,
-            [state.targetCenterLatLng.lng, state.targetCenterLatLng.lat],
-            { units: "kilometers" },
-          );
-          const rayLengthKm = Math.min(distanceToTarget + 1500, 20000);
-
-          const linePoints = buildBeamString(rayLengthKm, 100, true);
-          const lines = breakLinesOnMeridian(linePoints);
-          exactCollisionBeam = turf.featureCollection(lines);
-
-          let closestCountryPt = null;
-
-          const flattenedCountry = turf.flatten(state.targetData);
-          turf.featureEach(flattenedCountry, function (countryPart) {
-            turf.featureEach(exactCollisionBeam, function (linePart) {
-              const intersections = turf.lineIntersect(linePart, countryPart);
-              if (intersections.features.length > 0) isHit = true;
-              const startPoint = turf.point(linePart.geometry.coordinates[0]);
-              if (turf.booleanPointInPolygon(startPoint, countryPart)) isHit = true;
-            });
-          });
-
-          if (!isHit) {
-              const vertices = turf.explode(state.targetData);
-              const userPt = turf.point(state.userLocation);
-              turf.featureEach(vertices, function (pointFeature) {
-                const dist = turf.distance(userPt, pointFeature, { units: "kilometers" });
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  closestCountryPt = pointFeature;
-                }
-              });
-
-              if (closestCountryPt) {
-                  let pt2 = closestCountryPt.geometry.coordinates;
-                  if (state.userLocation[0] - pt2[0] > 180) pt2 = [pt2[0] + 360, pt2[1]];
-                  else if (pt2[0] - state.userLocation[0] > 180) pt2 = [pt2[0] - 360, pt2[1]];
-                  errorLine = turf.lineString([state.userLocation, pt2]);
-              }
-          }
-      }
-
-      const idealBearing = turf.bearing(state.userLocation, [
-        state.targetCenterLatLng.lng,
-        state.targetCenterLatLng.lat,
-      ]);
-      let headingNorm = state.currentHeading % 360;
-      let bearingNorm = idealBearing < 0 ? 360 + idealBearing : idealBearing;
-
-      let errorAngle = Math.abs(headingNorm - bearingNorm);
-      if (errorAngle > 180) errorAngle = 360 - errorAngle;
-
-      let turnPoints = 0;
+      let turnPoints = state.gameMode === 'classic' ? 0 : shot.points;
 
       if(UI.resultTitle) {
           if (isHit) {
             UI.resultTitle.textContent = "ACERTASTE ✅";
             UI.resultTitle.style.color = "#4ade80";
             if(UI.resultErrorDetails) UI.resultErrorDetails.style.display = "none";
-            turnPoints = 100;
           } else {
             UI.resultTitle.textContent = "FALLASTE ❌";
             UI.resultTitle.style.color = "#f87171";
-            if (errorAngle <= 90) turnPoints = Math.round(75 * (1 - errorAngle / 90));
-            else turnPoints = 0;
-
             if(UI.resultErrorDetails) {
-                UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${Math.round(minDistance)} km</b>`;
+                UI.resultErrorDetails.innerHTML = `Te faltaron aprox: <b>${shot.minDistanceKm} km</b>`;
                 UI.resultErrorDetails.style.display = "block";
             }
           }
       }
 
-      if (state.gameMode === 'classic') turnPoints = 0;
-
       if(UI.turnPointsDisplay) {
           if (state.gameMode === 'classic') {
             UI.turnPointsDisplay.style.display = "none";
           } else {
-            UI.turnPointsDisplay.textContent = `+${turnPoints} puntos`;
+            UI.turnPointsDisplay.textContent = pointsText(shot, turnPoints);
             UI.turnPointsDisplay.style.display = "block";
           }
       }
@@ -912,10 +903,8 @@ if (btnConfirmGame) {
         else if (state.turn === 6) UI.btnRestart.textContent = "Ver Marcador";
         else UI.btnRestart.textContent = "Siguiente Turno";
       } else if (state.gameMode === 'online') {
-        state.players[0].score += turnPoints;
-        if (isHit) state.players[0].hits++;
-        if (state.turn >= 10) UI.btnRestart.textContent = "Ver Puntuaciones";
-        else UI.btnRestart.textContent = "Siguiente Ronda";
+        // Solo se manda el rumbo: el servidor decide los puntos (online.js)
+        onlineShot(state.currentHeading);
       } else if (state.gameMode === 'ranked') {
         state.single.score += turnPoints;
         if (isHit) state.single.hits++;
@@ -924,7 +913,7 @@ if (btnConfirmGame) {
         if(UI.btnRestart) UI.btnRestart.textContent = "Siguiente ronda";
       }
 
-      setTimeout(() => { drawResultMap(exactCollisionBeam, isHit, errorLine); }, 100);
+      setTimeout(() => { drawResultMap(shot.beam, isHit, shot.errorLine); }, 100);
     });
 }
 
@@ -934,8 +923,7 @@ if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
     else if (state.turn >= 10) endLocalGame();
     else { state.turn++; state.currentPlayerIdx = (state.currentPlayerIdx + 1) % 2; startNewRound(); }
   } else if (state.gameMode === 'online') {
-    if (state.turn >= 10) endOnlineGame();
-    else { state.turn++; startNewRound(); }
+    onlineNext();
   } else if (state.gameMode === 'ranked') {
     if (state.single.round >= ROUNDS_PER_GAME) finishSingleGame();
     else { state.single.round++; startNewRound(); }
@@ -947,17 +935,55 @@ if(UI.btnRestart) UI.btnRestart.addEventListener("click", () => {
 /* =======================================
    LEADERBOARD Y PUNTUACIONES 
    ======================================= */
+/* Ranking local por Elo (elo.js). Se guarda en el móvil:
+   dondeQueda_elo_local = { "Nombre": { elo, games, wins, best } }
+   Los nombres del ranking antiguo (mejor puntuación) se conservan con 1000 de Elo. */
+const LOCAL_ELO_KEY = "dondeQueda_elo_local";
+const OLD_LOCAL_KEY = "dondeQueda_scores_local";
+
+function loadLocalElo() {
+  let table = null;
+  try { table = JSON.parse(localStorage.getItem(LOCAL_ELO_KEY)); } catch {}
+  if (table) return table;
+  table = {};
+  try {
+    const old = JSON.parse(localStorage.getItem(OLD_LOCAL_KEY)) || {};
+    Object.entries(old).forEach(([name, best]) => {
+      table[name] = { elo: DondeElo.START, games: 0, wins: 0, best: best || 0 };
+    });
+  } catch {}
+  return table;
+}
+
+// Busca el nombre sin distinguir mayúsculas, para no duplicar a "ana" y "Ana"
+function localEloKey(table, name) {
+  return Object.keys(table).find((k) => k.toLowerCase() === name.toLowerCase()) || name;
+}
+
 function saveScores(type) {
-  const key = type === 'local' ? "dondeQueda_scores_local" : "dondeQueda_scores_online";
-  let scores = JSON.parse(localStorage.getItem(key)) || {};
-  state.players.forEach((p) => {
-    let nameToSave = p.name.trim();
-    if (nameToSave === "") return;
-    let existingKey = Object.keys(scores).find((k) => k.toLowerCase() === nameToSave.toLowerCase());
-    let keyToUse = existingKey || nameToSave;
-    if (!scores[keyToUse] || p.score > scores[keyToUse]) scores[keyToUse] = p.score;
+  if (type !== 'local') return;
+  const table = loadLocalElo();
+  const players = state.players.filter((p) => p.name.trim());
+  // Puesto de cada uno: más puntos gana; a igualdad, más aciertos; si no, empate
+  const ranked = players.map((p) => ({ p, key: localEloKey(table, p.name.trim()) }));
+  ranked.forEach((r) => {
+    r.position = 1 + ranked.filter((o) => o.p.score > r.p.score || (o.p.score === r.p.score && o.p.hits > r.p.hits)).length;
+    if (!table[r.key]) table[r.key] = { elo: DondeElo.START, games: 0, wins: 0, best: 0 };
   });
-  localStorage.setItem(key, JSON.stringify(scores));
+  const result = DondeElo.rateMatch(ranked.map((r) => ({
+    id: r.key, rating: table[r.key].elo, games: table[r.key].games, position: r.position,
+  })));
+  state.lastEloDeltas = {};
+  result.forEach((res) => {
+    const r = ranked.find((x) => x.key === res.id);
+    const row = table[res.id];
+    row.elo = res.after;
+    row.games += 1;
+    if (r.position === 1 && ranked.some((o) => o.position > 1)) row.wins += 1;
+    row.best = Math.max(row.best || 0, r.p.score);
+    state.lastEloDeltas[res.id.toLowerCase()] = res.delta;
+  });
+  localStorage.setItem(LOCAL_ELO_KEY, JSON.stringify(table));
 }
 
 function renderLeaderboard(isEndGame = false) {
@@ -981,60 +1007,67 @@ function renderLeaderboard(isEndGame = false) {
       }
   }
 
-  const renderList = (key, listEl) => {
+  // Ranking local: ordenado por Elo
+  const renderLocalElo = (listEl) => {
       if(!listEl) return null;
-      let scores = JSON.parse(localStorage.getItem(key)) || {};
-      let sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      const table = loadLocalElo();
+      const sorted = Object.entries(table).sort((a, b) => b[1].elo - a[1].elo || b[1].wins - a[1].wins);
       let lowestHighlightedNode = null;
 
-      sortedScores.forEach(([name, score], index) => {
-          let li = document.createElement("li");
-          let extraStats = "";
+      sorted.forEach(([name, row], index) => {
+          const li = document.createElement("li");
+          const left = document.createElement("span");
+          left.textContent = `${index + 1}. ${name}`;
+          const right = document.createElement("div");
+          right.style.cssText = "text-align: right; display: flex; flex-direction: column;";
+          const main = document.createElement("span");
+          main.textContent = `${row.elo} Elo · ${row.wins} 🏆`;
+          right.appendChild(main);
 
-          if (isEndGame && state.players.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
-              let player = state.players.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
-              if ((key === "dondeQueda_scores_local" && state.gameMode === 'local') || 
-                  (key === "dondeQueda_scores_online" && state.gameMode === 'online')) {
-                  li.classList.add("highlight-gold");
-                  lowestHighlightedNode = li;
-                  if (key === "dondeQueda_scores_local" && state.gameMode === 'local') {
-                      let rounds = Math.floor(state.turn / 2); 
-                      let accuracy = Math.round((player.hits / rounds) * 100) || 0;
-                      extraStats = `Esta partida: ${player.hits}/${rounds} aciertos (${accuracy}%)`;
-                  }
-              }
+          const player = isEndGame && state.gameMode === 'local'
+              ? state.players.find((p) => p.name.trim().toLowerCase() === name.toLowerCase())
+              : null;
+          if (player) {
+              li.classList.add("highlight-gold");
+              lowestHighlightedNode = li;
+              const delta = (state.lastEloDeltas || {})[name.toLowerCase()] || 0;
+              const rounds = Math.max(1, Math.floor(state.turn / 2));
+              const accuracy = Math.round((player.hits / rounds) * 100) || 0;
+              const extra = document.createElement("span");
+              extra.style.cssText = "font-size: 0.85rem; color: #94a3b8; margin-top: 2px;";
+              extra.textContent = `${delta >= 0 ? "+" : ""}${delta} Elo · ${player.score} pts · ${player.hits}/${rounds} aciertos (${accuracy}%)`;
+              right.appendChild(extra);
           }
-          
-          li.innerHTML = `
-              <span>${index + 1}. ${name}</span>
-              <div style="text-align: right; display: flex; flex-direction: column;">
-                  <span>${score} pts</span>
-                  ${extraStats ? `<span style="font-size: 0.85rem; color: #94a3b8; margin-top: 2px;">${extraStats}</span>` : ''}
-              </div>
-          `;
+          li.append(left, right); // textContent: los nombres nunca se interpretan como HTML
           listEl.appendChild(li);
       });
       return lowestHighlightedNode;
   };
 
-  const nodeLocal = renderList("dondeQueda_scores_local", UI.leaderboardLocal);
-  const nodeOnline = renderList("dondeQueda_scores_online", UI.leaderboardOnline);
+  const nodeLocal = renderLocalElo(UI.leaderboardLocal);
+  // El ranking online sale de la base de datos del servidor (online.js)
+  if (UI.leaderboardOnline) renderOnlineRanking(UI.leaderboardOnline);
+
+  const isOnlineEnd = isEndGame && state.gameMode === 'online';
+  const standingsBox = document.getElementById("match-standings-box");
+  if (standingsBox && !isOnlineEnd) standingsBox.style.display = "none";
+  if (UI.btnVersusRestart) UI.btnVersusRestart.style.display = isOnlineEnd ? "none" : "";
 
   if (isEndGame) {
     if(UI.endgameActions) UI.endgameActions.style.display = "block";
     if(UI.standardActions) UI.standardActions.style.display = "none";
-    let targetNode = state.gameMode === 'local' ? nodeLocal : nodeOnline;
-    if (targetNode) { setTimeout(() => { targetNode.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 200); }
+    if (nodeLocal && state.gameMode === 'local') { setTimeout(() => { nodeLocal.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 200); }
   } else {
     if(UI.endgameActions) UI.endgameActions.style.display = "none";
     if(UI.standardActions) UI.standardActions.style.display = "block";
   }
 }
 
-if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", () => {
-  if (confirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.")) {
-    localStorage.removeItem("dondeQueda_scores_local");
-    localStorage.removeItem("dondeQueda_scores_online");
+if(UI.btnClearScores) UI.btnClearScores.addEventListener("click", async () => {
+  const confirmed = await customConfirm("¿Estás seguro de que deseas borrar todas las puntuaciones? Esta acción no se puede deshacer.");
+  if (confirmed) {
+    localStorage.removeItem(LOCAL_ELO_KEY);
+    localStorage.removeItem(OLD_LOCAL_KEY);
     renderLeaderboard(false);
   }
 });
@@ -1044,39 +1077,6 @@ if(UI.btnVersusRestart) UI.btnVersusRestart.addEventListener("click", () => {
   state.players.forEach(p => { p.score = 0; p.hits = 0; });
   startNewRound();
 });
-
-/* =======================================
-   MATEMÁTICAS Y COLISIONES
-   ======================================= */
-function buildBeamString(maxLength, step, wrapMeridian = false) {
-  const pts = [];
-  for (let d = 0; d <= maxLength; d += step) {
-    const p = turf.rhumbDestination(state.userLocation, d, state.currentHeading, { units: "kilometers" });
-    let lng = p.geometry.coordinates[0];
-    let lat = p.geometry.coordinates[1];
-    if (isNaN(lng) || isNaN(lat)) break;
-    if (lat > 89.5) { pts.push([lng, 89.5]); break; }
-    if (lat < -89.5) { pts.push([lng, -89.5]); break; }
-    if (wrapMeridian) { while (lng > 180) lng -= 360; while (lng < -180) lng += 360; }
-    pts.push([lng, lat]);
-  }
-  return pts;
-}
-
-function breakLinesOnMeridian(linePoints) {
-  const lines = []; let currentLine = [];
-  for (let pt of linePoints) {
-    if (currentLine.length > 0) {
-      if (Math.abs(pt[0] - currentLine[currentLine.length - 1][0]) > 180) {
-        if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-        currentLine = [];
-      }
-    }
-    currentLine.push(pt);
-  }
-  if (currentLine.length > 1) lines.push(turf.lineString(currentLine));
-  return lines;
-}
 
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
@@ -1110,6 +1110,12 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
       state.resultMap.fitBounds(bounds, { padding: [30, 30] });
   } else {
       L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(state.resultMap);
+      // Zona de acierto: solo se ve en destinos pequeños, donde es más grande que el país
+      if (state.lastShot && state.lastShot.zoneGeometry) {
+          L.geoJSON(state.lastShot.zoneGeometry, {
+              style: { color: "#facc15", weight: 1.5, dashArray: "4, 6", fillOpacity: 0.08, fillColor: "#facc15" },
+          }).addTo(state.resultMapLayers);
+      }
       L.geoJSON(state.targetData, {
           style: { fillColor: isHit ? "#22c55e" : "#ef4444", weight: 2, color: "#ffffff", fillOpacity: 0.8 },
       }).addTo(state.resultMapLayers);

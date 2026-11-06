@@ -62,7 +62,7 @@
             <button class="btn-menu" data-region="Europa">Europa</button>
             <button class="btn-menu" data-region="Asia">Asia</button>
             <button class="btn-menu" data-region="África">África</button>
-            <button class="btn-menu" data-region="Oceanía">Oceanía</button>
+            <button class="btn-menu btn-wide" data-region="Oceanía">Oceanía</button>
             <button class="btn-menu btn-spain" data-region="España">España</button>
         </div>
 
@@ -80,18 +80,52 @@
         <button id="btn-back-names" class="btn-secondary">Volver</button>
     </div>
 
+    <!-- PANTALLA ONLINE: CREAR SALA O UNIRSE -->
+    <div id="online-screen" class="screen">
+        <h2 style="color: #E2A342;">Partida online</h2>
+
+        <button id="btn-online-create" class="btn-action">Crear sala</button>
+
+        <p class="online-or">o únete con un código</p>
+        <input type="text" id="input-room-code" class="name-input room-code-input" maxlength="4"
+            placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button id="btn-online-join" class="btn-action btn-green">Unirse</button>
+
+        <p id="online-status" class="online-status"></p>
+        <button id="btn-online-back" class="btn-secondary">Volver</button>
+    </div>
+
+    <!-- SALA DE ESPERA (ONLINE) -->
+    <div id="waiting-screen" class="screen scrollable">
+        <h2 style="color: #E2A342; margin-bottom: 5px;">Sala</h2>
+        <div id="room-code" class="room-code">----</div>
+        <p id="room-region" class="region-subtitle" style="margin: 5px 0 10px 0;"></p>
+        <button id="btn-room-share" class="btn-secondary btn-small">Compartir código</button>
+
+        <ul id="room-players" class="leaderboard-list room-players"></ul>
+        <p id="room-hint" class="online-status"></p>
+
+        <button id="btn-room-start" disabled>Empezar partida</button>
+        <button id="btn-room-leave" class="btn-secondary">Salir</button>
+    </div>
+
     <!-- PANTALLA DE PUNTUACIONES (LEADERBOARD) -->
     <div id="leaderboard-screen" class="screen scrollable">
         <h1 id="leaderboard-winner-title" style="display: none; margin-bottom: 10px;">¡Ha ganado Nombre!</h1>
+        <!-- Clasificación de la partida online que acaba de terminar -->
+        <div id="match-standings-box" style="display: none; width: 100%; max-width: 350px;">
+            <ul id="match-standings" class="leaderboard-list"></ul>
+        </div>
+
         <h2 id="leaderboard-general-title" style="color: #E2A342; font-family: 'Ribeye Marrow', cursive; margin-top: 0;">Tabla Ranking</h2>
 
         <div class="leaderboard-tables">
             <div id="col-local" class="leaderboard-col">
-                <h3>Local</h3>
+                <h3>Local · Elo</h3>
                 <ul id="leaderboard-list-local" class="leaderboard-list"></ul>
             </div>
             <div id="col-online" class="leaderboard-col">
-                <h3>Online</h3>
+                <h3>Online · Elo mundial</h3>
                 <ul id="leaderboard-list-online" class="leaderboard-list"></ul>
             </div>
         </div>
@@ -188,9 +222,7 @@
         </div>
 
         <div class="compass-container">
-            <!-- La brújula gira -->
             <div id="compass-dial" class="compass-dial"></div>
-            <!-- La flecha es estática apuntando hacia arriba -->
             <img src="Flecha.png" alt="Flecha" class="fixed-arrow">
             <div id="debug-info">Azimut: Esperando...</div>
         </div>
@@ -206,8 +238,9 @@
         <p id="result-error-details" class="error-details" style="display: none;"></p>
         <div id="map-wrapper">
             <div id="map-container"></div>
-            <div id="offscreen-indicator">➔</div> <!-- Añadido indicador de fuera de pantalla -->
         </div>
+        <!-- Resultados de todos los jugadores en la ronda (solo online) -->
+        <ul id="online-round-list" class="leaderboard-list online-round-list" style="display: none;"></ul>
         <button id="btn-restart">Siguiente Destino</button>
         <button id="btn-change-region" class="btn-secondary">Volver</button>
     </div>
@@ -219,7 +252,6 @@
         
         <div style="width: 100%; max-width: 350px; margin-bottom: 30px;">
             <ul id="midgame-list" class="leaderboard-list">
-                <!-- Se rellena con JS simulando la tabla local -->
             </ul>
         </div>
 
@@ -256,12 +288,25 @@
         </div>
     </div>
 
+    <!-- MODAL DE CONFIRMACIÓN PERSONALIZADO -->
+    <div id="custom-confirm" class="confirm-overlay" style="display: none;">
+        <div class="confirm-box">
+            <p id="confirm-message" style="margin: 0; font-family: Arial, sans-serif; font-size: 1.1rem; line-height: 1.5;"></p>
+            <div class="confirm-actions">
+                <button id="btn-confirm-cancel" class="btn-secondary">Cancelar</button>
+                <button id="btn-confirm-ok" class="btn-danger-small">Aceptar</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
-    <!-- Archivos Modulares -->
     <script src="data.js"></script>
+    <script src="shot.js"></script>
+    <script src="elo.js"></script>
     <script src="app.js"></script>
+    <script src="online.js"></script>
 </body>
 
 </html>
