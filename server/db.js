@@ -333,7 +333,7 @@ function divisionTable(playerId, limit) {
   }
   return {
     me,
-    table: { key: me.key, name: me.division ? `${me.tierName} ${me.division}` : me.tierName, tier: me.tier },
+    table: { key: me.key, name: me.name, tier: me.tier },
     ranking: rows.map((r, i) => ({
       position: i + 1,
       name: r.name,

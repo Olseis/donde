@@ -8,6 +8,8 @@
    Ligas, de abajo arriba:
      Hierro, Bronce, Plata, Oro, Platino, Esmeralda, Diamante  → divisiones IV, III, II, I
      Maestro, Gran Maestro, Aspirante                            → sin divisiones, LP sin tope
+   Hierro va de broma: sus divisiones se llaman Puñado de tierra (IV), Bolsa de plástico (III),
+   Tablón de madera (II) y Hierro (I).
    Cada división son 100 LP: al pasar de 99 subes de división; al bajar de 0, bajas.
    Gran Maestro y Aspirante no se ganan por LP sino por puesto entre los Maestros
    (los mejores N), y se calculan al ver el ranking.
@@ -43,6 +45,10 @@ const APEX = {
   challenger: { id: "challenger", name: "Aspirante" },
 };
 const DIVISIONS = ["IV", "III", "II", "I"];
+// Hierro va de broma: cada división tiene su propio "material" en vez de IV, III, II, I
+const DIVISION_NAMES = {
+  iron: { IV: "Puñado de tierra", III: "Bolsa de plástico", II: "Tablón de madera", I: "Hierro" },
+};
 
 const CFG = {
   PLACEMENT_GAMES: 5,
@@ -85,17 +91,19 @@ function describe(ladder, gamesPlayed = 0, apexTier = null) {
   if (ladder >= CFG.MASTER_LADDER) {
     const t = APEX[apexTier] || APEX.master;
     const lp = ladder - CFG.MASTER_LADDER;
-    return { tier: t.id, tierName: t.name, division: null, lp, label: `${t.name} · ${lp} LP`, key: t.id };
+    return { tier: t.id, tierName: t.name, division: null, name: t.name, lp, label: `${t.name} · ${lp} LP`, key: t.id };
   }
   const t = TIERS[Math.floor(ladder / 400)];
   const division = DIVISIONS[Math.floor((ladder % 400) / 100)];
   const lp = ladder % 100;
+  const name = DIVISION_NAMES[t.id]?.[division] || `${t.name} ${division}`;
   return {
     tier: t.id,
     tierName: t.name,
     division,
+    name, // cómo se llama la división en pantalla: "Oro II", "Bolsa de plástico"...
     lp,
-    label: `${t.name} ${division} · ${lp} LP`,
+    label: `${name} · ${lp} LP`,
     key: `${t.id}-${division}`,
   };
 }

@@ -26,7 +26,11 @@ assert.deepStrictEqual([tie.a, tie.b], [0, 0], "empate entre dos: nadie gana ni 
 console.log("✔ reparto por puesto (10, 4, 3 jugadores y empate)");
 
 // 2. Nombres de rango
-assert.strictEqual(R.describe(0).label, "Hierro IV · 0 LP");
+assert.strictEqual(R.describe(0).label, "Puñado de tierra · 0 LP");
+assert.strictEqual(R.describe(150).label, "Bolsa de plástico · 50 LP");
+assert.strictEqual(R.describe(299).label, "Tablón de madera · 99 LP");
+assert.strictEqual(R.describe(399).label, "Hierro · 99 LP");
+assert.strictEqual(R.describe(400).label, "Bronce IV · 0 LP");
 assert.strictEqual(R.describe(1345).label, "Oro III · 45 LP");
 assert.strictEqual(R.describe(2799).label, "Diamante I · 99 LP");
 assert.strictEqual(R.describe(3150).label, "Maestro · 350 LP");
@@ -63,7 +67,7 @@ const floor = R.applyMatch([
   { id: "a", position: 1, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
   { id: "b", position: 2, games: 20, ladder: 5, mmrBefore: 600, mmrAfter: 600 },
 ]);
-assert.strictEqual(floor.b.after, "Hierro IV · 0 LP");
+assert.strictEqual(floor.b.after, "Puñado de tierra · 0 LP");
 console.log("✔ ascensos, descensos y suelo en Hierro IV");
 
 // 4. Con la base de datos: 10 jugadores, 6 partidas siempre en el mismo orden
@@ -93,7 +97,7 @@ for (const id of [ids[0], ids[5], ids[9]]) {
   assert(t.ranking.some((r) => r.you), "te ves en tu tabla");
   for (const r of t.ranking) assert(r.lp >= 0 && r.lp <= 99);
   assert.strictEqual(t.table.key, mine.key);
-  console.log(`  Tabla de ${mine.tierName} ${mine.division}:`, t.ranking.map((r) => `${r.name} ${r.lp}`).join(", "));
+  console.log(`  Tabla de ${mine.name}:`, t.ranking.map((r) => `${r.name} ${r.lp}`).join(", "));
 }
 const unranked = "jugador-nuevo-123";
 assert.strictEqual(store.divisionTable(unranked, 50).table, null);
