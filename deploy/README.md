@@ -57,12 +57,14 @@ núcleo al arrancar el servicio.
 1. Un jugador pulsa **Ranked** (o **Local**) → **Crear sala**, elige región y ubicación. Le sale un código de 4 letras.
 2. Los demás (hasta 10 en total) pulsan **Unirse**, escriben el código y eligen su ubicación.
 3. El anfitrión (👑) pulsa **Empezar**. El servidor elige los 10 destinos (nunca el país de ningún jugador).
-4. En cada ronda todos ven el mismo destino a la vez y tienen 60 s. El móvil **solo manda el rumbo**:
+4. En cada ronda todos ven el mismo destino a la vez y tienen 15 s. El móvil **solo manda el rumbo**:
    el servidor calcula el acierto con el mismo código que el juego (`www/shot.js`) y reparte los puntos.
 5. Cuando todos han disparado se ven los resultados de todos; con todos en "Siguiente" (o a los 30 s) sigue.
 6. Al final todo queda guardado en la base de datos y aparece en el **ranking online mundial**.
 
 Si alguien pierde la conexión, el móvil reconecta solo y vuelve a la ronda en la que estaba.
+En iPhone, al bloquear la pantalla iOS congela la conexión sin cerrarla: el móvil lo detecta
+(ping cada 5 s, comprobación al volver a la app y al acabarse el tiempo) y se reconecta.
 Si alguien se va, la partida sigue sin esperarle.
 
 ## Base de datos

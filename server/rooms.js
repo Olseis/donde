@@ -21,7 +21,7 @@ const CFG = {
   ROUNDS: 10,
   MIN_PLAYERS: 2,
   MAX_PLAYERS: 10,
-  SHOT_TIMEOUT_MS: 60_000, // tiempo para apuntar en cada ronda
+  SHOT_TIMEOUT_MS: 15_000, // tiempo para apuntar en cada ronda
   NEXT_TIMEOUT_MS: 30_000, // tiempo viendo resultados antes de pasar solo
   RECONNECT_GRACE_MS: 120_000, // si se va todo el mundo, la sala aguanta esto
   LOBBY_IDLE_MS: 30 * 60_000,
@@ -187,7 +187,13 @@ function joinRoom(player, code, ranked) {
 // Al reconectarse a mitad de partida, el móvil necesita saber en qué punto está
 function resendCurrentState(room, playerId) {
   const p = room.players.get(playerId);
-  if (!p || room.status !== "playing") return;
+  if (!p) return;
+  if (room.status === "finished" && room.finishedMsg) {
+    if (room.lastResult) send(p.ws, room.lastResult);
+    send(p.ws, room.finishedMsg);
+    return;
+  }
+  if (room.status !== "playing") return;
   if (room.phase === "aiming") {
     send(p.ws, roundMessage(room));
     const mine = room.shots.get(playerId);
@@ -408,7 +414,9 @@ function finish(room) {
       eloDelta: r.mmrAfter - r.mmrBefore,
     });
   }
-  broadcast(room, { t: "finished", matchId: room.matchId, standings: publicStandings(room, final) });
+  // Se guarda para quien vuelva a conectarse justo después (p. ej. un iPhone que estaba bloqueado)
+  room.finishedMsg = { t: "finished", matchId: room.matchId, standings: publicStandings(room, final) };
+  broadcast(room, room.finishedMsg);
   // La sala se borra al rato; los resultados ya están en la base de datos
   room.timer = setTimeout(() => destroyRoom(room), 60_000);
 }

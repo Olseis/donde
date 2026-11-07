@@ -69,6 +69,9 @@ const Online = {
   retries: 0,
   timerInterval: null,
   lastResult: null,
+  lastHeard: 0, // cuándo llegó el último mensaje del servidor
+  heartbeat: null,
+  wakeLock: null,
 
   /* ---------- Conexión ---------- */
   connect() {
@@ -86,10 +89,14 @@ const Online = {
       ws.onopen = () => {
         clearTimeout(failTimer);
         this.retries = 0;
+        this.lastHeard = Date.now();
+        this.startHeartbeat();
         this.send({ t: "hello", playerId: getPlayerId(), secret: getSecret(), name: this.name });
       };
       ws.onmessage = (ev) => {
+        this.lastHeard = Date.now();
         const msg = JSON.parse(ev.data);
+        if (msg.t === "pong") return;
         if (msg.t === "welcome") {
           this.publicId = msg.publicId;
           if (msg.secret) localStorage.setItem(SECRET_KEY, msg.secret);
@@ -127,8 +134,71 @@ const Online = {
     if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(msg));
   },
 
+  /* ---------- Conexiones "zombis" (iPhone) ----------
+     Cuando el iPhone bloquea la pantalla o la app pasa a segundo plano, iOS congela
+     la conexión sin cerrarla: el móvil no se entera de que está muerta y se queda
+     esperando (mismo país, contador en 0). Para detectarlo:
+     - cada 5 s se manda un ping; si en 12 s no llega nada del servidor, se reconecta
+     - al volver a la app, si la conexión no responde enseguida, se reconecta
+     Al reconectar, el servidor manda la ronda o el resultado en el que va la sala. */
+  startHeartbeat() {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => {
+      if (!this.wantConnected) return this.stopHeartbeat();
+      if (this.ws && this.ws.readyState === 1 && Date.now() - this.lastHeard > 12000) return this.forceReconnect();
+      this.send({ t: "ping" });
+    }, 5000);
+  },
+
+  stopHeartbeat() {
+    clearInterval(this.heartbeat);
+    this.heartbeat = null;
+  },
+
+  // Tira la conexión actual (aunque parezca abierta) y abre otra
+  forceReconnect() {
+    if (!this.wantConnected) return;
+    const old = this.ws;
+    if (old) {
+      old.onclose = null;
+      old.onmessage = null;
+      try { old.close(); } catch {}
+    }
+    this.ws = null;
+    setOnlineStatus("Reconectando...");
+    this.connect().then(() => setOnlineStatus("")).catch(() => this.scheduleReconnect());
+  },
+
+  // Al volver a la app: un ping y, si no contesta en 2 s, conexión nueva
+  checkAlive() {
+    if (!this.wantConnected) return;
+    if (!this.ws || this.ws.readyState > 1) return this.forceReconnect();
+    const asked = Date.now();
+    this.send({ t: "ping" });
+    setTimeout(() => {
+      if (this.wantConnected && this.lastHeard < asked) this.forceReconnect();
+    }, 2000);
+  },
+
+  // Que la pantalla no se apague durante la partida (si el navegador lo permite)
+  async keepAwake() {
+    try {
+      if (!this.wakeLock && navigator.wakeLock && document.visibilityState === "visible") {
+        this.wakeLock = await navigator.wakeLock.request("screen");
+        this.wakeLock.addEventListener("release", () => (this.wakeLock = null));
+      }
+    } catch {}
+  },
+
+  releaseAwake() {
+    try { if (this.wakeLock) this.wakeLock.release(); } catch {}
+    this.wakeLock = null;
+  },
+
   disconnect() {
     this.wantConnected = false;
+    this.stopHeartbeat();
+    this.releaseAwake();
     this.send({ t: "leave" });
     this.room = null;
     this.round = null;
@@ -230,6 +300,7 @@ const Online = {
   async onRound(msg) {
     this.round = msg;
     this.lastResult = null;
+    this.keepAwake();
     if (state.mode === "world" && !state.countriesGeoJSON) await loadCountries();
     showOnlineRound(msg);
   },
@@ -387,6 +458,15 @@ OUI.btnLeave.addEventListener("click", async () => {
   if (await customConfirm("¿Seguro que quieres salir de la sala?")) returnToMenu();
 });
 
+// Al volver a la app o recuperar la red, comprobar que la conexión sigue viva
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  Online.checkAlive();
+  if (Online.round) Online.keepAwake();
+});
+window.addEventListener("pageshow", () => Online.checkAlive());
+window.addEventListener("online", () => Online.checkAlive());
+
 /* ---------- Rondas ---------- */
 async function loadCountries() {
   const res = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
@@ -419,8 +499,14 @@ function showOnlineRound(msg) {
 
 function startRoundTimer(deadline) {
   stopRoundTimer();
+  Online.resyncAt = null;
   const tick = () => {
     const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    // Se acabó el tiempo hace 4 s y el servidor no ha mandado el resultado: la conexión está colgada
+    if (Date.now() - deadline > 4000 && Online.round && !Online.lastResult && !Online.resyncAt) {
+      Online.resyncAt = Date.now();
+      Online.forceReconnect();
+    }
     const me = myStanding();
     UI.roundInfo.textContent = `Ronda ${Online.round.round} de ${Online.round.total} · ${me ? me.score : 0} pts · ⏱ ${secs} s`;
   };
