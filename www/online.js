@@ -756,9 +756,43 @@ function ensureLegalAccepted() {
   });
 }
 
-function openLegal(section) {
+// Se descarga legal.html y se pinta dentro de la ventana con srcdoc. Así no le afecta la cabecera
+// X-Frame-Options del servidor (que impide meter páginas en un iframe) y funciona igual en la web y en la app.
+const LEGAL_URL_REMOTE = "https://217.72.207.119/legal.html";
+async function openLegal(section) {
   const viewer = document.getElementById("legal-viewer");
-  document.getElementById("legal-frame").src = `legal.html?embedded=1#${section || "aviso"}`;
+  const frame = document.getElementById("legal-frame");
+  const id = section || "aviso";
+  let html;
+  try {
+    const res = await fetch("legal.html", { cache: "no-cache" });
+    if (!res.ok) throw new Error(res.status);
+    html = await res.text();
+  } catch {
+    // Sin el archivo (p. ej. una app antigua): se abre la página del servidor en el navegador
+    window.open(`${LEGAL_URL_REMOTE}#${id}`, "_blank");
+    return;
+  }
+  // Las rutas relativas (fuentes, logo) tienen que apuntar a esta web
+  const base = new URL(".", location.href).href;
+  html = html.replace(/(href|src)="(?!https?:|mailto:|#)([^"]+)"/g, (m, attr, url) => `${attr}="${base}${url}"`);
+  frame.onload = () => {
+    try {
+      const doc = frame.contentDocument;
+      doc.body.classList.add("embedded");
+      // Enlaces internos (#privacidad...): desplazarse dentro de la ventana
+      doc.addEventListener("click", (ev) => {
+        const a = ev.target.closest('a[href^="#"]');
+        if (!a) return;
+        ev.preventDefault();
+        doc.getElementById(a.getAttribute("href").slice(1))?.scrollIntoView();
+      });
+      // Enlaces externos: en una pestaña nueva / el navegador del móvil
+      doc.querySelectorAll('a[href^="http"]').forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+      doc.getElementById(id)?.scrollIntoView();
+    } catch {}
+  };
+  frame.srcdoc = html;
   viewer.style.display = "flex";
 }
 document.getElementById("btn-legal-close").addEventListener("click", () => {
