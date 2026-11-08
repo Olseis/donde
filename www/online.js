@@ -24,6 +24,12 @@ const ONLINE_BASE =
     : SERVER_URL;
 const ONLINE_WS = ONLINE_BASE.replace(/^http/, "ws") + "/ws";
 
+/* ---------- Parte legal ----------
+   LEGAL_VERSION es la fecha de los textos de www/legal.html. Si cambian en algo importante,
+   se sube la fecha aquí y allí, y el juego vuelve a pedir la aceptación antes de jugar online. */
+const LEGAL_VERSION = "2026-11-08";
+const LEGAL_KEY = "dondeQueda_legalAccepted";
+
 const PLAYER_ID_KEY = "dondeQueda_playerId";
 const SECRET_KEY = "dondeQueda_secret"; // clave que da el servidor: solo la tiene este móvil
 const ONLINE_NAME_KEY = "dondeQueda_onlineName";
@@ -91,7 +97,7 @@ const Online = {
         this.retries = 0;
         this.lastHeard = Date.now();
         this.startHeartbeat();
-        this.send({ t: "hello", playerId: getPlayerId(), secret: getSecret(), name: this.name });
+        this.send({ t: "hello", playerId: getPlayerId(), secret: getSecret(), name: this.name, terms: acceptedTerms() });
       };
       ws.onmessage = (ev) => {
         this.lastHeard = Date.now();
@@ -469,7 +475,7 @@ window.addEventListener("online", () => Online.checkAlive());
 
 /* ---------- Rondas ---------- */
 async function loadCountries() {
-  const res = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
+  const res = await fetch("data/countries.geo.json");
   state.countriesGeoJSON = DondeShot.withMicrostates(turf, await res.json(), microstates);
 }
 
@@ -708,3 +714,115 @@ async function renderOnlineRanking(listEl) {
     addLine("No se pudo cargar el ranking online.");
   }
 }
+
+/* =======================================
+   PARTE LEGAL
+   - Antes de la primera partida en sala: 14 años o más + condiciones y privacidad
+   - Textos (legal.html) en una ventana dentro del juego
+   - "Descargar mis datos" y "Borrar mis datos" (RGPD arts. 15, 17 y 20)
+   ======================================= */
+function acceptedTerms() {
+  try { return localStorage.getItem(LEGAL_KEY) === LEGAL_VERSION ? LEGAL_VERSION : undefined; } catch { return undefined; }
+}
+
+// Devuelve true si ya estaban aceptadas o las acepta ahora; false si cancela
+function ensureLegalAccepted() {
+  if (acceptedTerms()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("legal-consent");
+    const check = document.getElementById("legal-accept");
+    const ok = document.getElementById("btn-legal-ok");
+    const cancel = document.getElementById("btn-legal-cancel");
+    check.checked = false;
+    ok.disabled = true;
+    overlay.style.display = "flex";
+    const onCheck = () => (ok.disabled = !check.checked);
+    const done = (accepted) => {
+      check.removeEventListener("change", onCheck);
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      overlay.style.display = "none";
+      resolve(accepted);
+    };
+    const onOk = () => {
+      if (!check.checked) return;
+      try { localStorage.setItem(LEGAL_KEY, LEGAL_VERSION); } catch {}
+      done(true);
+    };
+    const onCancel = () => done(false);
+    check.addEventListener("change", onCheck);
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+  });
+}
+
+function openLegal(section) {
+  const viewer = document.getElementById("legal-viewer");
+  document.getElementById("legal-frame").src = `legal.html?embedded=1#${section || "aviso"}`;
+  viewer.style.display = "flex";
+}
+document.getElementById("btn-legal-close").addEventListener("click", () => {
+  document.getElementById("legal-viewer").style.display = "none";
+});
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-legal]");
+  if (!el) return;
+  ev.preventDefault();
+  openLegal(el.dataset.legal);
+});
+
+async function myDataRequest(path) {
+  const res = await fetch(`${ONLINE_BASE}/api/online/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ playerId: getPlayerId(), secret: getSecret() }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Error ${res.status}`);
+  return res.json();
+}
+
+document.getElementById("btn-my-data").addEventListener("click", async () => {
+  const box = document.getElementById("my-data");
+  const pre = document.getElementById("my-data-json");
+  pre.textContent = "Cargando…";
+  box.style.display = "flex";
+  try {
+    const data = await myDataRequest("me");
+    // Lo que hay solo en este móvil también es tuyo: se enseña (sin la clave)
+    data.this_device = {
+      player_id: getPlayerId(),
+      name: localStorage.getItem(ONLINE_NAME_KEY),
+      terms_accepted: localStorage.getItem(LEGAL_KEY),
+      secret: getSecret() ? "(guardada en este móvil, no se muestra)" : null,
+    };
+    pre.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    pre.textContent = "No se han podido descargar tus datos: " + e.message;
+  }
+});
+document.getElementById("btn-my-data-close").addEventListener("click", () => {
+  document.getElementById("my-data").style.display = "none";
+});
+document.getElementById("btn-my-data-copy").addEventListener("click", async () => {
+  const text = document.getElementById("my-data-json").textContent;
+  try {
+    if (navigator.share) await navigator.share({ title: "Mis datos de ¿Dónde queda...?", text });
+    else await navigator.clipboard.writeText(text);
+  } catch {}
+});
+
+document.getElementById("btn-delete-data").addEventListener("click", async () => {
+  const sure = await customConfirm(
+    "Se borrarán para siempre tu cuenta, tu rango y tus partidas. Este móvil empezará con una cuenta nueva. ¿Seguro?",
+  );
+  if (!sure) return;
+  try {
+    await myDataRequest("delete");
+    resetIdentity();
+    try { localStorage.removeItem(ONLINE_NAME_KEY); } catch {}
+    Online.disconnect();
+    setOnlineStatus("Tus datos se han borrado.");
+  } catch (e) {
+    setOnlineStatus("No se han podido borrar: " + e.message + ". Escríbenos (Privacidad).");
+  }
+});

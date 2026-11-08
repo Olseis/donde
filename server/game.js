@@ -12,7 +12,7 @@ const turf = require("@turf/turf");
 
 const WWW_DIR = process.env.WWW_DIR || path.join(__dirname, "..", "www");
 const COUNTRIES_PATH =
-  process.env.COUNTRIES_PATH || path.join(__dirname, "data", "countries.geo.json");
+  process.env.COUNTRIES_PATH || path.join(WWW_DIR, "data", "countries.geo.json"); // el mismo que carga el móvil
 
 const { judgeShot, withMicrostates, tooClose } = require(path.join(WWW_DIR, "shot.js"));
 

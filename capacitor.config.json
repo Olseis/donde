@@ -1,5 +1,6 @@
 {
   "appId": "com.dondequeda.dondequeda",
   "appName": "Donde Queda",
-  "webDir": "www"
+  "webDir": "www",
+  "appendUserAgent": "DondeQueda/1.0 (+https://217.72.207.119/legal.html)"
 }

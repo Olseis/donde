@@ -140,14 +140,42 @@ app.get("/api/online/ranking", (req, res) => {
   res.json(store.divisionTable(me, limit));
 });
 
-// Últimas partidas de un jugador: solo las suyas, con su clave
-app.post("/api/online/history", express.json({ limit: "1kb" }), (req, res) => {
+// Comprueba playerId + clave en las peticiones de "mis datos". Devuelve el playerId,
+// null si ese jugador no tiene nada guardado, o responde con el error y devuelve false.
+function ownPlayer(req, res) {
   const { playerId, secret } = req.body || {};
-  if (!PLAYER_ID_REGEX.test(playerId || "")) return res.status(400).json({ error: "playerId no válido" });
+  if (!PLAYER_ID_REGEX.test(playerId || "")) return res.status(400).json({ error: "playerId no válido" }), false;
   const stored = store.secretHashOf(playerId);
+  if (stored === undefined) return null; // nunca jugó Ranked: no hay nada suyo en la BD
   if (!stored || !SECRET_REGEX.test(secret || "") || !sameHash(stored, hashSecret(secret)))
-    return res.status(403).json({ error: "No autorizado" });
-  res.json({ matches: store.history(playerId) });
+    return res.status(403).json({ error: "No autorizado" }), false;
+  return playerId;
+}
+const smallJson = express.json({ limit: "1kb" });
+
+// Últimas partidas de un jugador: solo las suyas, con su clave
+app.post("/api/online/history", smallJson, (req, res) => {
+  const id = ownPlayer(req, res);
+  if (id === false) return;
+  res.json({ matches: id ? store.history(id) : [] });
+});
+
+// Derecho de acceso y portabilidad (RGPD art. 15 y 20): todo lo que hay guardado de ti
+app.post("/api/online/me", smallJson, (req, res) => {
+  const id = ownPlayer(req, res);
+  if (id === false) return;
+  res.json({
+    exported_at: new Date().toISOString(),
+    player: id ? store.myData(id) : null,
+    note: id ? undefined : "No hay ningún dato tuyo guardado: solo se guarda algo al jugar Ranked.",
+  });
+});
+
+// Derecho de supresión (RGPD art. 17): borra la cuenta y sus partidas
+app.post("/api/online/delete", smallJson, (req, res) => {
+  const id = ownPlayer(req, res);
+  if (id === false) return;
+  res.json({ deleted: id ? store.deletePlayer(id) : false });
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "No existe" }));
@@ -227,6 +255,8 @@ function handleMessage(ws, msg) {
     ws.playerName = name;
     ws.secretHash = hash;
     ws.publicId = publicIdOf(msg.playerId);
+    // Versión de las condiciones que el jugador aceptó en el móvil (se guarda al jugar Ranked)
+    ws.terms = /^\d{4}-\d{2}-\d{2}$/.test(msg.terms || "") ? msg.terms : null;
     // Nada se guarda en la BD aquí: solo al empezar una Ranked
     ws.send(JSON.stringify({ t: "welcome", publicId: ws.publicId, ...(issued ? { secret: issued } : {}) }));
     return;
@@ -234,7 +264,8 @@ function handleMessage(ws, msg) {
 
   if (!ws.playerId) throw userErr("no_hello", "Primero identifícate.");
   const player = {
-    id: ws.playerId, pub: ws.publicId, name: ws.playerName, secretHash: ws.secretHash, ip: ws.ip, ws,
+    id: ws.playerId, pub: ws.publicId, name: ws.playerName, secretHash: ws.secretHash, ip: ws.ip,
+    termsVersion: ws.terms, ws,
   };
 
   switch (msg.t) {

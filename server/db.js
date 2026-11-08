@@ -38,6 +38,7 @@ const Ranked = require("./ranked"); // ligas y LP visibles
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "donde.db");
 const KEEP_MATCHES = 20; // partidas que se guardan de cada jugador
+const INACTIVE_YEARS = 2; // cuentas sin jugar Ranked en este tiempo se borran solas
 
 // La carpeta y el archivo solo los puede leer el propio servidor
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true, mode: 0o700 });
@@ -128,19 +129,28 @@ const addedTotals = addColumns("players", "secret_hash", `
   ALTER TABLE players ADD COLUMN wins INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE players ADD COLUMN best_score INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE players ADD COLUMN hits INTEGER NOT NULL DEFAULT 0;`, false);
+// Versión de las condiciones que aceptó (fecha, p. ej. "2026-11-08"): prueba de la aceptación
+addColumns("players", "terms_version", `ALTER TABLE players ADD COLUMN terms_version TEXT;`, false);
 const addedCount = addColumns("matches", "players_count",
   `ALTER TABLE matches ADD COLUMN players_count INTEGER NOT NULL DEFAULT 0;`, false);
 db.exec("CREATE INDEX IF NOT EXISTS idx_players_ladder ON players(ladder DESC)");
 
 const q = {
   upsertPlayer: db.prepare(`
-    INSERT INTO players (id, name, secret_hash) VALUES (@id, @name, @secretHash)
+    INSERT INTO players (id, name, secret_hash, terms_version) VALUES (@id, @name, @secretHash, @terms)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       last_seen = datetime('now'),
-      secret_hash = COALESCE(players.secret_hash, excluded.secret_hash)
+      secret_hash = COALESCE(players.secret_hash, excluded.secret_hash),
+      terms_version = COALESCE(excluded.terms_version, players.terms_version)
   `),
   auth: db.prepare("SELECT secret_hash FROM players WHERE id = ?"),
+  // Todo lo que hay de un jugador (derecho de acceso): todo menos el hash de la clave
+  myData: db.prepare(`SELECT name, created_at, last_seen, elo AS mmr, elo_games AS games, ladder,
+    wins, best_score, hits, terms_version FROM players WHERE id = ?`),
+  matchesOf: db.prepare("SELECT match_id FROM match_players WHERE player_id = ?"),
+  deletePlayer: db.prepare("DELETE FROM players WHERE id = ?"),
+  inactive: db.prepare(`SELECT id FROM players WHERE last_seen < datetime('now', '-${INACTIVE_YEARS} years')`),
   setSecret: db.prepare("UPDATE players SET secret_hash = ? WHERE id = ? AND secret_hash IS NULL"),
   insertMatch: db.prepare(
     "INSERT INTO matches (code, region, total_rounds, players_count) VALUES (?, ?, ?, ?)",
@@ -301,6 +311,15 @@ if (db.pragma("auto_vacuum", { simple: true }) !== 2) {
 }
 try { fs.chmodSync(DB_PATH, 0o600); } catch {}
 
+const deletePlayer = db.transaction((playerId) => {
+  const matches = q.matchesOf.all(playerId).map((r) => r.match_id);
+  for (const m of matches) {
+    q.dropMatchPlayer.run(m, playerId);
+    q.dropIfEmpty.run(m, m);
+  }
+  return q.deletePlayer.run(playerId).changes === 1;
+});
+
 // Rango legible de un jugador (con Gran Maestro / Aspirante resueltos)
 function rankOf(playerId) {
   const row = q.player.get(playerId);
@@ -349,6 +368,7 @@ function divisionTable(playerId, limit) {
 module.exports = {
   db,
   KEEP_MATCHES,
+  INACTIVE_YEARS,
 
   // Hash de la clave del jugador (o undefined si aún no ha jugado ninguna Ranked)
   secretHashOf(id) {
@@ -362,7 +382,9 @@ module.exports = {
 
   // Crea la partida y, si hacía falta, los jugadores. players: [{ id, name, secretHash }]
   createMatch: db.transaction((code, region, totalRounds, players) => {
-    for (const p of players) q.upsertPlayer.run({ id: p.id, name: p.name, secretHash: p.secretHash || null });
+    for (const p of players) {
+      q.upsertPlayer.run({ id: p.id, name: p.name, secretHash: p.secretHash || null, terms: p.termsVersion || null });
+    }
     const matchId = Number(q.insertMatch.run(code, region, totalRounds, players.length).lastInsertRowid);
     for (const p of players) q.insertMatchPlayer.run(matchId, p.id, p.name);
     return matchId;
@@ -397,8 +419,23 @@ module.exports = {
     return q.history.all(playerId);
   },
 
+  // Derecho de acceso: sus datos y sus partidas guardadas (null si nunca jugó Ranked)
+  myData(playerId) {
+    const row = q.myData.get(playerId);
+    if (!row) return null;
+    return { ...row, rank: rankOf(playerId).label, matches: q.history.all(playerId) };
+  },
+
+  // Derecho de supresión: borra al jugador, sus filas en las partidas y las partidas que se quedan vacías
+  deletePlayer,
+
+
   // Devuelve al disco el espacio de lo borrado, poco a poco (barato)
   maintenance() {
+    // Cuentas que llevan INACTIVE_YEARS sin jugar una Ranked
+    const old = q.inactive.all();
+    for (const { id } of old) deletePlayer(id);
+    if (old.length) console.log(`Borradas ${old.length} cuentas sin jugar desde hace ${INACTIVE_YEARS} años`);
     db.pragma("incremental_vacuum(500)");
     db.pragma("optimize");
   },

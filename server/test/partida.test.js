@@ -37,7 +37,7 @@ class Client {
   send(msg) { this.ws.send(JSON.stringify(msg)); }
   // Se identifica y guarda la clave que le da el servidor (como hace el móvil)
   async hello() {
-    this.send({ t: "hello", playerId: this.id, secret: this.secret, name: this.name });
+    this.send({ t: "hello", playerId: this.id, secret: this.secret, name: this.name, terms: "2026-11-08" });
     const w = await this.wait((m) => m.t === "welcome" || m.t === "error");
     if (w.t === "error") throw Object.assign(new Error(w.message), { code: w.code });
     if (w.secret) this.secret = w.secret;
@@ -128,7 +128,29 @@ async function seguridad(ana, beto, db) {
   console.log("✔ como mucho 3 salas abiertas por IP");
   conns.forEach((c) => c.ws.terminate());
 
-  // 6. API: 60 peticiones por minuto y por IP
+  // 6. Mis datos: descargar y borrar (RGPD), solo con la clave
+  const api = (path, body) => fetch(`http://127.0.0.1:${PORT}/api/online/${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  assert.strictEqual((await api("me", { playerId: ana.id })).status, 403);
+  assert.strictEqual((await api("delete", { playerId: ana.id, secret: beto.secret })).status, 403);
+  const mine = await (await api("me", { playerId: ana.id, secret: ana.secret })).json();
+  assert.strictEqual(mine.player.name, "Ana");
+  assert.strictEqual(mine.player.terms_version, "2026-11-08", "se guarda qué condiciones aceptó");
+  assert.strictEqual(mine.player.matches.length, 1);
+  assert(!JSON.stringify(mine).includes("secret_hash") && !JSON.stringify(mine).includes(ana.secret));
+  const nobody = await (await api("me", { playerId: "nunca-jugo-0001" })).json();
+  assert.strictEqual(nobody.player, null);
+  assert.deepStrictEqual(await (await api("delete", { playerId: ana.id, secret: ana.secret })).json(), { deleted: true });
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM players WHERE id = ?").get(ana.id).n, 0);
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(ana.id).n, 0);
+  assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(beto.id).n, 1,
+    "la partida sigue para los demás");
+  const again = new Client("Ana"); await again.open; again.id = ana.id;
+  assert.ok((await again.hello()).secret, "tras borrar, ese móvil empieza de cero");
+  console.log("✔ descargar y borrar mis datos");
+
+  // 7. API: 60 peticiones por minuto y por IP
   let limited = 0;
   for (let i = 0; i < 70; i++) {
     const r = await fetch(`http://127.0.0.1:${PORT}/api/health`, { headers: { "X-Forwarded-For": `1.1.1.${i}, 198.51.100.9` } });

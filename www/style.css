@@ -763,3 +763,35 @@ input, textarea {
     background-color: #E2A342;
     color: #0f172a;
 }
+
+/* =======================================
+   PARTE LEGAL: enlaces, aceptación, visor y "mis datos"
+   ======================================= */
+.legal-links {
+    font-family: Arial, sans-serif; font-size: 0.85rem; color: #94a3b8;
+    margin: 18px 0 0; line-height: 1.8;
+}
+.link-btn {
+    background: none; border: none; padding: 0; margin: 0; width: auto;
+    color: #7dd3fc; text-decoration: underline; font: inherit; cursor: pointer; box-shadow: none;
+}
+.legal-box { max-width: 380px; text-align: left; font-family: Arial, sans-serif; font-size: 0.95rem; line-height: 1.5; }
+.legal-box p { margin: 0 0 12px; }
+.legal-title { font-family: 'Ribeye Marrow', cursive; color: #E2A342; margin: 0 0 10px; font-weight: 400; text-align: center; }
+.legal-check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.legal-check input { width: 22px; height: 22px; flex: 0 0 auto; margin: 0; accent-color: #E2A342; }
+#btn-legal-ok:disabled { opacity: 0.5; }
+.legal-viewer {
+    position: fixed; inset: 0; z-index: 3500; background: #0f172a;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) 0 calc(10px + env(safe-area-inset-bottom));
+}
+.legal-viewer iframe { flex: 1; width: 100%; border: 0; background: #0f172a; }
+.legal-viewer button { align-self: center; margin: 10px 0 0; min-width: 160px; }
+.my-data-json {
+    max-height: 45vh; overflow: auto; background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+    padding: 10px; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word;
+    -webkit-user-select: text; user-select: text;
+}
+/* El texto de atribución de los mapas (OpenStreetMap) tiene que verse siempre */
+.leaflet-control-attribution { font-family: Arial, sans-serif; font-size: 10px; }

@@ -130,4 +130,12 @@ const fra = sql.prepare("SELECT shots, hits FROM target_stats WHERE kind = 'coun
 assert.deepStrictEqual(fra, { shots: 60, hits: 24 });
 console.log("✔ solo las últimas 20 partidas por jugador; los totales no se pierden");
 
+// 7. Cuentas inactivas: a los 2 años sin jugar Ranked se borran solas
+sql.prepare("UPDATE players SET last_seen = datetime('now', '-25 months') WHERE id = ?").run(pair[1]);
+store.maintenance();
+assert(!sql.prepare("SELECT 1 FROM players WHERE id = ?").get(pair[1]), "la cuenta inactiva se borra");
+assert.strictEqual(sql.prepare("SELECT COUNT(*) n FROM match_players WHERE player_id = ?").get(pair[0]).n, store.KEEP_MATCHES,
+  "las partidas siguen para los demás");
+console.log("✔ cuentas sin jugar en 2 años se borran solas");
+
 console.log("\n✅ Clasificatoria correcta");

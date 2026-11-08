@@ -47,7 +47,7 @@ main() {
 
   # ¿Ha cambiado algo del servidor?
   local changed deps=no
-  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js www/elo.js || true)
+  changed=$(git diff --name-only "$before" "$after" -- server www/shot.js www/data.js www/elo.js www/data || true)
   if [ -n "$changed" ]; then
     git diff --name-only "$before" "$after" | grep -q '^server/package-lock.json' && deps=yes
     # Se apunta antes de intentarlo: si falla, el próximo minuto se vuelve a probar

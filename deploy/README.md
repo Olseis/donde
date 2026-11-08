@@ -67,6 +67,10 @@ En iPhone, al bloquear la pantalla iOS congela la conexión sin cerrarla: el mó
 (ping cada 5 s, comprobación al volver a la app y al acabarse el tiempo) y se reconecta.
 Si alguien se va, la partida sigue sin esperarle.
 
+Textos legales: `www/legal.html` (en el servidor, https://217.72.207.119/legal.html). Ver `CLAUDE.md`
+para mantenerlos al día. Los datos de cada jugador se descargan con `POST /api/online/me` y se borran
+con `POST /api/online/delete` (los dos con su clave). Las cuentas sin jugar Ranked en 2 años se borran solas.
+
 ## Base de datos
 
 `/var/lib/donde/donde.db` (fuera del repo: el cron nunca la toca). Solo guarda **Ranked**.

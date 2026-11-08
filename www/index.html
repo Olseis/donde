@@ -6,10 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dónde queda...</title>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Limelight&family=Ribeye+Marrow&display=swap" rel="stylesheet">
+    <!-- Todo se sirve desde el propio juego: ni Google Fonts ni CDN (privacidad y funciona sin ellos) -->
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="vendor/fonts/fonts.css">
 
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="stylesheet" href="style.css">
@@ -87,6 +86,13 @@
 
         <p id="online-status" class="online-status"></p>
         <button id="btn-online-back" class="btn-secondary">Volver</button>
+
+        <!-- Derechos del jugador (RGPD): sus datos, a un toque -->
+        <p class="legal-links">
+            <button type="button" id="btn-my-data" class="link-btn">Descargar mis datos</button> ·
+            <button type="button" id="btn-delete-data" class="link-btn">Borrar mis datos</button> ·
+            <button type="button" class="link-btn" data-legal="privacidad">Privacidad</button>
+        </p>
     </div>
 
     <!-- SALA DE ESPERA (ONLINE) -->
@@ -145,8 +151,15 @@
             <h3>Juego creado por <a href="https://sites.google.com/view/olseis/" target="_blank">Olseis Games</a>.</h3>
             <p>En colaboración con <a href="https://github.com/RaoulLabrunie" target="_blank">Raúl Labrunie</a>.</p><br>
             <p>Este proyecto utiliza <a href="https://leafletjs.com/" target="_blank">Leaflet</a>,
-                <a href="https://turfjs.org/" target="_blank">Turf.js</a>, Mapas por Google Maps
-                y <a href="https://github.com/johan/world.geo.json" target="_blank">World GeoJSON</a>.
+                <a href="https://turfjs.org/" target="_blank">Turf.js</a>, mapas de
+                <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap</a>
+                y <a href="https://github.com/johan/world.geo.json" target="_blank">World GeoJSON</a> (Natural Earth).
+            </p>
+            <p class="legal-links">
+                <button type="button" class="link-btn" data-legal="aviso">Aviso legal</button> ·
+                <button type="button" class="link-btn" data-legal="privacidad">Privacidad</button> ·
+                <button type="button" class="link-btn" data-legal="condiciones">Condiciones</button> ·
+                <button type="button" class="link-btn" data-legal="licencias">Licencias</button>
             </p>
         </div>
         <button id="btn-back-credits" class="btn-secondary">Volver</button>
@@ -204,6 +217,46 @@
         <button id="btn-change-region" class="btn-secondary">Volver</button>
     </div>
 
+    <!-- ANTES DE LA PRIMERA PARTIDA ONLINE: edad y condiciones -->
+    <div id="legal-consent" class="confirm-overlay" style="display: none;">
+        <div class="confirm-box legal-box">
+            <h3 class="legal-title">Antes de jugar online</h3>
+            <p>En las salas tu móvil envía al servidor tu <b>nombre de jugador</b>, el <b>punto de partida</b>
+                que elijas y hacia dónde disparas. Tu ubicación <b>no se guarda</b>. En Ranked se guardan tu nombre,
+                tu rango y tus últimas 20 partidas, y puedes borrarlos cuando quieras.</p>
+            <p>
+                <button type="button" class="link-btn" data-legal="privacidad">Política de privacidad</button> ·
+                <button type="button" class="link-btn" data-legal="condiciones">Condiciones de uso</button>
+            </p>
+            <label class="legal-check">
+                <input type="checkbox" id="legal-accept">
+                <span>Tengo 14 años o más y acepto las condiciones de uso y la política de privacidad.</span>
+            </label>
+            <div class="confirm-actions">
+                <button id="btn-legal-cancel" class="btn-secondary">Cancelar</button>
+                <button id="btn-legal-ok" disabled>Continuar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEXTOS LEGALES (legal.html dentro del juego) -->
+    <div id="legal-viewer" class="legal-viewer" style="display: none;">
+        <iframe id="legal-frame" title="Información legal"></iframe>
+        <button id="btn-legal-close" class="btn-secondary">Cerrar</button>
+    </div>
+
+    <!-- MIS DATOS: lo que hay guardado del jugador -->
+    <div id="my-data" class="confirm-overlay" style="display: none;">
+        <div class="confirm-box legal-box">
+            <h3 class="legal-title">Mis datos</h3>
+            <pre id="my-data-json" class="my-data-json"></pre>
+            <div class="confirm-actions">
+                <button id="btn-my-data-copy" class="btn-secondary">Copiar</button>
+                <button id="btn-my-data-close">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL DE CONFIRMACIÓN PERSONALIZADO -->
     <div id="custom-confirm" class="confirm-overlay" style="display: none;">
         <div class="confirm-box">
@@ -215,8 +268,8 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+    <script src="vendor/leaflet/leaflet.js"></script>
+    <script src="vendor/turf/turf.min.js"></script>
 
     <script src="data.js"></script>
     <script src="shot.js"></script>

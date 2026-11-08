@@ -158,7 +158,7 @@ function addPlayer(room, player) {
   if (room.players.size >= CFG.MAX_PLAYERS) throw userError("room_full", "La sala está llena.");
 
   const p = {
-    id: player.id, pub: player.pub, secretHash: player.secretHash,
+    id: player.id, pub: player.pub, secretHash: player.secretHash, termsVersion: player.termsVersion,
     name: player.name, ws: player.ws, location: null, score: 0, hits: 0,
     rank: room.ranked ? store.rankOf(player.id).label : null, // se enseña en la sala de espera
   };
@@ -276,7 +276,7 @@ function startMatch(ws) {
   // Solo las Ranked se guardan (y es aquí cuando el jugador entra en la BD)
   room.matchId = room.ranked
     ? store.createMatch(room.code, room.region, CFG.ROUNDS,
-      players.map((p) => ({ id: p.id, name: p.name, secretHash: p.secretHash })))
+      players.map((p) => ({ id: p.id, name: p.name, secretHash: p.secretHash, termsVersion: p.termsVersion })))
     : null;
   room.status = "playing";
   room.round = 0;

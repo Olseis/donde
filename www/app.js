@@ -220,7 +220,9 @@ if (typeof window.Capacitor !== "undefined" && window.Capacitor.Plugins && windo
 // Botones de modo
 if(UI.btnModeSolo) UI.btnModeSolo.addEventListener("click", () => { state.gameMode = 'solo'; goToRegionSelect(); });
 
-function askNameForRoom(mode) {
+async function askNameForRoom(mode) {
+  // Primera vez en una sala: confirmar la edad y aceptar condiciones y privacidad (online.js)
+  if (!(await ensureLegalAccepted())) return;
   state.gameMode = mode;
   if(UI.namesTitle) UI.namesTitle.textContent = mode === 'ranked' ? "Ranked · tu nombre" : "Local · tu nombre";
   if(UI.inputP1) UI.inputP1.value = localStorage.getItem("dondeQueda_onlineName") || "";
@@ -285,7 +287,7 @@ async function loadAssetsAndPrepareLoc() {
     if(UI.startLoading) UI.startLoading.style.display = "block";
 
     try {
-      let geoRes = await fetch("https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json");
+      let geoRes = await fetch("data/countries.geo.json"); // dentro del juego, sin CDN
       // Se añaden los microestados (Andorra, Mónaco...), que no vienen en el mapa
       state.countriesGeoJSON = DondeShot.withMicrostates(turf, await geoRes.json(), microstates);
     } catch (error) {
@@ -330,7 +332,8 @@ function prepareLocationScreen() {
   const zoom = state.tempLocation ? (state.mode === 'spain' ? 5 : 4) : (state.mode === 'spain' ? 5 : 1);
 
   if (!state.selectionMap) {
-    state.selectionMap = L.map("select-map-container", { zoomControl: false, attributionControl: false });
+    state.selectionMap = L.map("select-map-container", { zoomControl: false });
+    state.selectionMap.attributionControl.setPrefix(false);
     state.selectionMap.on("click", (ev) => {
       state.tempLocation = [ev.latlng.lng, ev.latlng.lat];
 
@@ -351,7 +354,7 @@ function prepareLocationScreen() {
   state.selectionMap.setView(center, zoom);
   
   if (state.mode === 'spain') {
-      L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.selectionMap);
+      osmLayer().addTo(state.selectionMap);
   } else if (state.countriesGeoJSON) {
       L.geoJSON(state.countriesGeoJSON, { style: COUNTRIES_STYLE }).addTo(state.selectionMap);
   }
@@ -620,9 +623,19 @@ function renderLeaderboard(isEndGame = false) {
 /* =======================================
    RENDERIZADO MAPA DE RESULTADOS
    ======================================= */
+// Mapa de calles del modo España: OpenStreetMap, con su atribución siempre visible
+// (lo exige su licencia ODbL y la política de uso de tile.openstreetmap.org).
+// El mapa del mundo no usa teselas: son los contornos de data/countries.geo.json.
+function osmLayer() {
+  return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+  });
+}
 function drawResultMap(beamGeometry, isHit, errorLine = null) {
   if (!state.resultMap) {
-    state.resultMap = L.map("map-container", { zoomControl: false, attributionControl: false });
+    state.resultMap = L.map("map-container", { zoomControl: false });
+    state.resultMap.attributionControl.setPrefix(false);
     state.resultMapLayers = L.featureGroup().addTo(state.resultMap);
   }
 
@@ -634,7 +647,7 @@ function drawResultMap(beamGeometry, isHit, errorLine = null) {
   });
 
   if (state.mode === 'spain') {
-      L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}').addTo(state.resultMap);
+      osmLayer().addTo(state.resultMap);
       L.geoJSON(state.targetData.polygonGeometry, {
           style: { fillColor: isHit ? '#22c55e' : '#ef4444', weight: 2, color: '#ffffff', fillOpacity: 0.8 }
       }).addTo(state.resultMapLayers);
