@@ -4,6 +4,8 @@
 - Los cambios se entregan como parche (`git format-patch`) con autor Raoul Labrunie
   <rlabrunieespinosa@gmail.com> y Claude como coautor.
 - Pruebas: `cd server && npm test`.
+- Titulares del juego (y corresponsables de los datos): Raoul Labrunie y Ventura Macarro Díaz,
+  como Olseis Games. Contacto público: contacto@donde.com.
 
 ## Parte legal (mantener al día en CADA parche)
 
